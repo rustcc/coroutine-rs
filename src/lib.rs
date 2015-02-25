@@ -210,12 +210,10 @@
 // #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
 //        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
-// // NB this does *not* include globs, please keep it that way.
-// #![feature(macro_rules, phase, default_type_params)]
-// #![allow(deprecated)]
+#![feature(box_syntax, std_misc, os, libc, env)]
 
-// #[cfg(test)] #[phase(plugin, link)] extern crate log;
-// extern crate libc;
+#[macro_use] extern crate log;
+extern crate libc;
 // extern crate alloc;
 // extern crate native;
 
@@ -239,11 +237,11 @@
 // mod message_queue;
 
 // pub mod basic;
-// pub mod context;
+pub mod context;
 // pub mod coroutine;
 // pub mod sched;
 // pub mod sleeper_list;
-// pub mod stack;
+pub mod stack;
 // pub mod task;
 
 // /// A helper macro for booting a program with libgreen

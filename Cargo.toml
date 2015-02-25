@@ -12,6 +12,7 @@ build = "build.rs"
 
 [build-dependencies]
 gcc = "*"
+log = "*"
 
 [lib]
 name = "coroutine"

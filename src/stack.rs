@@ -10,14 +10,15 @@
 
 use std::ptr;
 use std::sync::atomic;
-use std::os::{errno, page_size, MemoryMap, MapReadable, MapWritable,
-              MapNonStandardFlags, getenv};
+use std::os::{errno, MemoryMap, MapOption};
+use std::env::{self, page_size};
+
 use libc;
 
 /// A task's stack. The name "Stack" is a vestige of segmented stacks.
 pub struct Stack {
     buf: Option<MemoryMap>,
-    min_size: uint,
+    min_size: usize,
 }
 
 // Try to use MAP_STACK on platforms that support it (it's what we're doing
@@ -32,20 +33,20 @@ static STACK_FLAGS: libc::c_int = libc::MAP_STACK | libc::MAP_PRIVATE |
                                   libc::MAP_ANON;
 #[cfg(any(target_os = "freebsd",
           target_os = "dragonfly"))]
-static STACK_FLAGS: libc::c_int = libc::MAP_PRIVATE | libc::MAP_ANON;
+static STACK_FLAGS: libc::c_isize = libc::MAP_PRIVATE | libc::MAP_ANON;
 #[cfg(windows)]
-static STACK_FLAGS: libc::c_int = 0;
+static STACK_FLAGS: libc::c_isize = 0;
 
 impl Stack {
     /// Allocate a new stack of `size`. If size = 0, this will fail. Use
     /// `dummy_stack` if you want a zero-sized stack.
-    pub fn new(size: uint) -> Stack {
+    pub fn new(size: usize) -> Stack {
         // Map in a stack. Eventually we might be able to handle stack
         // allocation failure, which would fail to spawn the task. But there's
         // not many sensible things to do on OOM.  Failure seems fine (and is
         // what the old stack allocation did).
-        let stack = match MemoryMap::new(size, &[MapReadable, MapWritable,
-                                         MapNonStandardFlags(STACK_FLAGS)]) {
+        let stack = match MemoryMap::new(size, &[MapOption::MapReadable, MapOption::MapWritable,
+                                         MapOption::MapNonStandardFlags(STACK_FLAGS)]) {
             Ok(map) => map,
             Err(e) => panic!("mmap for stack of size {} failed: {}", size, e)
         };
@@ -55,7 +56,7 @@ impl Stack {
         // page. It isn't guaranteed, but that's why FFI is unsafe. buf.data is
         // guaranteed to be aligned properly.
         if !protect_last_page(&stack) {
-            panic!("Could not memory-protect guard page. stack={}, errno={}",
+            panic!("Could not memory-protect guard page. stack={:?}, errno={}",
                   stack.data(), errno());
         }
 
@@ -73,20 +74,20 @@ impl Stack {
         }
     }
 
-    pub fn guard(&self) -> *const uint {
-        (self.start() as uint + page_size()) as *const uint
+    pub fn guard(&self) -> *const usize {
+        (self.start() as usize + page_size()) as *const usize
     }
 
-    /// Point to the low end of the allocated stack
-    pub fn start(&self) -> *const uint {
-        self.buf.as_ref().map(|m| m.data() as *const uint)
+    /// Poisize to the low end of the allocated stack
+    pub fn start(&self) -> *const usize {
+        self.buf.as_ref().map(|m| m.data() as *const usize)
             .unwrap_or(ptr::null())
     }
 
-    /// Point one uint beyond the high end of the allocated stack
-    pub fn end(&self) -> *const uint {
+    /// Poisize one usize beyond the high end of the allocated stack
+    pub fn end(&self) -> *const usize {
         self.buf.as_ref().map(|buf| unsafe {
-            buf.data().offset(buf.len() as int) as *const uint
+            buf.data().offset(buf.len() as isize) as *const usize
         }).unwrap_or(ptr::null())
     }
 }
@@ -128,10 +129,10 @@ impl StackPool {
         }
     }
 
-    pub fn take_stack(&mut self, min_size: uint) -> Stack {
+    pub fn take_stack(&mut self, min_size: usize) -> Stack {
         // Ideally this would be a binary search
         match self.stacks.iter().position(|s| min_size <= s.min_size) {
-            Some(idx) => self.stacks.swap_remove(idx).unwrap(),
+            Some(idx) => self.stacks.swap_remove(idx),
             None => Stack::new(min_size)
         }
     }
@@ -143,19 +144,19 @@ impl StackPool {
     }
 }
 
-fn max_cached_stacks() -> uint {
-    static mut AMT: atomic::AtomicUint = atomic::INIT_ATOMIC_UINT;
-    match unsafe { AMT.load(atomic::SeqCst) } {
+fn max_cached_stacks() -> usize {
+    static mut AMT: atomic::AtomicUsize = atomic::ATOMIC_USIZE_INIT;
+    match unsafe { AMT.load(atomic::Ordering::SeqCst) } {
         0 => {}
         n => return n - 1,
     }
-    let amt = getenv("RUST_MAX_CACHED_STACKS").and_then(|s| from_str(s.as_slice()));
+    let amt = env::var("RUST_MAX_CACHED_STACKS").ok().and_then(|s| s.parse().ok());
     // This default corresponds to 20M of cache per scheduler (at the
     // default size).
     let amt = amt.unwrap_or(10);
     // 0 is our sentinel value, so ensure that we'll never see 0 after
     // initialization has run
-    unsafe { AMT.store(amt + 1, atomic::SeqCst); }
+    unsafe { AMT.store(amt + 1, atomic::Ordering::SeqCst); }
     return amt;
 }
 

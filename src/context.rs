@@ -9,12 +9,14 @@
 // except according to those terms.
 
 use stack::Stack;
-use std::uint;
+use std::usize;
 use std::mem::transmute;
-use std::rt::stack;
+// use std::rt::stack;
 use std::raw;
 #[cfg(target_arch = "x86_64")]
 use std::simd;
+use std::thunk::Thunk;
+
 use libc;
 
 // FIXME #7761: Registers is boxed so that it is 16-byte aligned, for storing
@@ -27,10 +29,17 @@ pub struct Context {
     /// Hold the registers while the task or scheduler is suspended
     regs: Box<Registers>,
     /// Lower bound and upper bound for the stack
-    stack_bounds: Option<(uint, uint)>,
+    stack_bounds: Option<(usize, usize)>,
 }
 
-pub type InitFn = extern "C" fn(uint, *mut (), *mut ()) -> !;
+pub type InitFn = extern "C" fn(usize, *mut (), *mut ()) -> !;
+
+extern "C" fn bridge_to_c(func: *mut libc::c_void) {
+    use std::mem::transmute;
+
+    let f: Box<Thunk> = unsafe {transmute(func)};
+    f.invoke(());
+}
 
 impl Context {
     pub fn empty() -> Context {
@@ -43,17 +52,17 @@ impl Context {
     /// Create a new context that will resume execution by running proc()
     ///
     /// The `init` function will be run with `arg` and the `start` procedure
-    /// split up into code and env pointers. It is required that the `init`
+    /// split up isizeo code and env poisizeers. It is required that the `init`
     /// function never return.
     ///
-    /// FIXME: this is basically an awful the interface. The main reason for
+    /// FIXME: this is basically an awful the isizeerface. The main reason for
     ///        this is to reduce the number of allocations made when a green
     ///        task is spawned as much as possible
-    pub fn new(init: InitFn, arg: uint, start: proc():Send,
+    pub fn new<F: FnOnce() + Send>(init: InitFn, arg: usize, start: F,
                stack: &mut Stack) -> Context {
 
-        let sp: *const uint = stack.end();
-        let sp: *mut uint = sp as *mut uint;
+        let sp: *const usize = stack.end();
+        let sp: *mut usize = sp as *mut usize;
         // Save and then immediately load the current context,
         // which we will then modify to call the given function when restored
         let mut regs = new_regs();
@@ -61,7 +70,7 @@ impl Context {
         initialize_call_frame(&mut *regs,
                               init,
                               arg,
-                              unsafe { transmute(start) },
+                              unsafe { transmute(Thunk::new(start)) },
                               sp);
 
         // Scheduler tasks don't have a stack in the "we allocated it" sense,
@@ -69,11 +78,11 @@ impl Context {
         // them in terms of the code running on them (and hopefully they don't
         // overflow). Additionally, their coroutine stacks are listed as being
         // zero-length, so that's how we detect what's what here.
-        let stack_base: *const uint = stack.start();
+        let stack_base: *const usize = stack.start();
         let bounds = if sp as libc::uintptr_t == stack_base as libc::uintptr_t {
             None
         } else {
-            Some((stack_base as uint, sp as uint))
+            Some((stack_base as usize, sp as usize))
         };
         return Context {
             regs: regs,
@@ -88,15 +97,15 @@ impl Context {
     then loading the registers from a previously saved Context.
     */
     pub fn swap(out_context: &mut Context, in_context: &Context) {
-        rtdebug!("swapping contexts");
+        debug!("swapping contexts");
         let out_regs: &mut Registers = match out_context {
-            &Context { regs: box ref mut r, .. } => r
+            &mut Context { regs: ref mut r, .. } => r
         };
         let in_regs: &Registers = match in_context {
-            &Context { regs: box ref r, .. } => r
+            &Context { regs: ref r, .. } => r
         };
 
-        rtdebug!("noting the stack limit and doing raw swap");
+        debug!("noting the stack limit and doing raw swap");
 
         unsafe {
             // Right before we switch to the new context, set the new context's
@@ -105,19 +114,22 @@ impl Context {
             // returns because they would all likely fail due to the limit being
             // invalid for the current task. Lucky for us `rust_swap_registers`
             // is a C function so we don't have to worry about that!
-            match in_context.stack_bounds {
-                Some((lo, hi)) => stack::record_rust_managed_stack_bounds(lo, hi),
-                // If we're going back to one of the original contexts or
-                // something that's possibly not a "normal task", then reset
-                // the stack limit to 0 to make morestack never fail
-                None => stack::record_rust_managed_stack_bounds(0, uint::MAX),
-            }
+            //
+            // FIXME: the `std::rt::stack` is already gone!
+            //
+            // match in_context.stack_bounds {
+            //     Some((lo, hi)) => stack::record_rust_managed_stack_bounds(lo, hi),
+            //     // If we're going back to one of the original contexts or
+            //     // something that's possibly not a "normal task", then reset
+            //     // the stack limit to 0 to make morestack never fail
+            //     None => stack::record_rust_managed_stack_bounds(0, usize::MAX),
+            // }
             rust_swap_registers(out_regs, in_regs)
         }
     }
 }
 
-#[link(name = "context_switch", kind = "static")]
+#[link(name = "ctxswtch", kind = "static")]
 extern {
     fn rust_swap_registers(out_regs: *mut Registers, in_regs: *const Registers);
 }
@@ -127,7 +139,7 @@ extern {
 // These structures all represent a context of one task throughout its
 // execution. Each struct is a representation of the architecture's register
 // set. When swapping between tasks, these register sets are used to save off
-// the current registers into one struct, and load them all from another.
+// the current registers isizeo one struct, and load them all from another.
 //
 // Note that this is only used for context switching, which means that some of
 // the registers may go unused. For example, for architectures with
@@ -165,24 +177,24 @@ fn new_regs() -> Box<Registers> {
 }
 
 #[cfg(target_arch = "x86")]
-fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
-                         procedure: raw::Procedure, sp: *mut uint) {
-    let sp = sp as *mut uint;
-    // x86 has interesting stack alignment requirements, so do some alignment
+fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
+                         procedure: raw::Closure, sp: *mut usize) {
+    let sp = sp as *mut usize;
+    // x86 has isizeeresting stack alignment requirements, so do some alignment
     // plus some offsetting to figure out what the actual stack should be.
     let sp = align_down(sp);
     let sp = mut_offset(sp, -4);
 
-    unsafe { *mut_offset(sp, 2) = procedure.env as uint };
-    unsafe { *mut_offset(sp, 1) = procedure.code as uint };
-    unsafe { *mut_offset(sp, 0) = arg as uint };
+    unsafe { *mut_offset(sp, 2) = procedure.env as usize };
+    unsafe { *mut_offset(sp, 1) = procedure.code as usize };
+    unsafe { *mut_offset(sp, 0) = arg as usize };
     let sp = mut_offset(sp, -1);
     unsafe { *sp = 0 }; // The final return address
 
     regs.esp = sp as u32;
     regs.eip = fptr as u32;
 
-    // Last base pointer on the stack is 0
+    // Last base poisizeer on the stack is 0
     regs.ebp = 0;
 }
 
@@ -191,44 +203,44 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
 #[cfg(all(windows, target_arch = "x86_64"))]
 #[repr(C)]
 struct Registers {
-    gpr:[libc::uintptr_t, ..14],
-    _xmm:[simd::u32x4, ..10]
+    gpr:[libc::uintptr_t; 14],
+    _xmm:[simd::u32x4; 10]
 }
 #[cfg(all(not(windows), target_arch = "x86_64"))]
 #[repr(C)]
 struct Registers {
-    gpr:[libc::uintptr_t, ..10],
-    _xmm:[simd::u32x4, ..6]
+    gpr:[libc::uintptr_t; 10],
+    _xmm:[simd::u32x4; 6]
 }
 
 #[cfg(all(windows, target_arch = "x86_64"))]
 fn new_regs() -> Box<Registers> {
     box() Registers {
-        gpr:[0,..14],
-        _xmm:[simd::u32x4(0,0,0,0),..10]
+        gpr:[0; 14],
+        _xmm:[simd::u32x4(0,0,0,0); 10]
     }
 }
 #[cfg(all(not(windows), target_arch = "x86_64"))]
 fn new_regs() -> Box<Registers> {
     box() Registers {
-        gpr:[0,..10],
-        _xmm:[simd::u32x4(0,0,0,0),..6]
+        gpr:[0; 10],
+        _xmm:[simd::u32x4(0,0,0,0); 6]
     }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
-                         procedure: raw::Procedure, sp: *mut uint) {
+fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
+                         procedure: raw::Closure, sp: *mut usize) {
     extern { fn rust_bootstrap_green_task(); }
 
     // Redefinitions from rt/arch/x86_64/regs.h
-    static RUSTRT_RSP: uint = 1;
-    static RUSTRT_IP: uint = 8;
-    static RUSTRT_RBP: uint = 2;
-    static RUSTRT_R12: uint = 4;
-    static RUSTRT_R13: uint = 5;
-    static RUSTRT_R14: uint = 6;
-    static RUSTRT_R15: uint = 7;
+    static RUSTRT_RSP: usize = 1;
+    static RUSTRT_IP: usize = 8;
+    static RUSTRT_RBP: usize = 2;
+    static RUSTRT_R12: usize = 4;
+    static RUSTRT_R13: usize = 5;
+    static RUSTRT_R14: usize = 6;
+    static RUSTRT_R15: usize = 7;
 
     let sp = align_down(sp);
     let sp = mut_offset(sp, -1);
@@ -236,12 +248,12 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
     // The final return address. 0 indicates the bottom of the stack
     unsafe { *sp = 0; }
 
-    rtdebug!("creating call frame");
-    rtdebug!("fptr {:#x}", fptr as libc::uintptr_t);
-    rtdebug!("arg {:#x}", arg);
-    rtdebug!("sp {}", sp);
+    debug!("creating call frame");
+    debug!("fptr {:#x}", fptr as libc::uintptr_t);
+    debug!("arg {:#x}", arg);
+    debug!("sp {:?}", sp);
 
-    // These registers are frobbed by rust_bootstrap_green_task into the right
+    // These registers are frobbed by rust_bootstrap_green_task isizeo the right
     // location so we can invoke the "real init function", `fptr`.
     regs.gpr[RUSTRT_R12] = arg as libc::uintptr_t;
     regs.gpr[RUSTRT_R13] = procedure.code as libc::uintptr_t;
@@ -255,19 +267,19 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
     regs.gpr[RUSTRT_RSP] = sp as libc::uintptr_t;
     regs.gpr[RUSTRT_IP] = rust_bootstrap_green_task as libc::uintptr_t;
 
-    // Last base pointer on the stack should be 0
+    // Last base poisizeer on the stack should be 0
     regs.gpr[RUSTRT_RBP] = 0;
 }
 
 #[cfg(target_arch = "arm")]
-type Registers = [libc::uintptr_t, ..32];
+type Registers = [libc::uintptr_t; 32];
 
 #[cfg(target_arch = "arm")]
-fn new_regs() -> Box<Registers> { box {[0, .. 32]} }
+fn new_regs() -> Box<Registers> { box {[0; 32]} }
 
 #[cfg(target_arch = "arm")]
-fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
-                         procedure: raw::Procedure, sp: *mut uint) {
+fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
+                         procedure: raw::Closure, sp: *mut usize) {
     extern { fn rust_bootstrap_green_task(); }
 
     let sp = align_down(sp);
@@ -279,7 +291,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
 
     // ARM uses the same technique as x86_64 to have a landing pad for the start
     // of all new green tasks. Neither r1/r2 are saved on a context switch, so
-    // the shim will copy r3/r4 into r1/r2 and then execute the function in r5
+    // the shim will copy r3/r4 isizeo r1/r2 and then execute the function in r5
     regs[0] = arg as libc::uintptr_t;              // r0
     regs[3] = procedure.code as libc::uintptr_t;   // r3
     regs[4] = procedure.env as libc::uintptr_t;    // r4
@@ -290,16 +302,16 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
 
 #[cfg(any(target_arch = "mips",
           target_arch = "mipsel"))]
-type Registers = [libc::uintptr_t, ..32];
+type Registers = [libc::uintptr_t; 32];
 
 #[cfg(any(target_arch = "mips",
           target_arch = "mipsel"))]
-fn new_regs() -> Box<Registers> { box {[0, .. 32]} }
+fn new_regs() -> Box<Registers> { box {[0; 32]} }
 
 #[cfg(any(target_arch = "mips",
           target_arch = "mipsel"))]
-fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
-                         procedure: raw::Procedure, sp: *mut uint) {
+fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
+                         procedure: raw::Closure, sp: *mut usize) {
     let sp = align_down(sp);
     // sp of mips o32 is 8-byte aligned
     let sp = mut_offset(sp, -2);
@@ -315,14 +327,14 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: uint,
     regs[31] = fptr as libc::uintptr_t;
 }
 
-fn align_down(sp: *mut uint) -> *mut uint {
-    let sp = (sp as uint) & !(16 - 1);
-    sp as *mut uint
+fn align_down(sp: *mut usize) -> *mut usize {
+    let sp = (sp as usize) & !(16 - 1);
+    sp as *mut usize
 }
 
-// ptr::mut_offset is positive ints only
+// ptr::mut_offset is positive isizes only
 #[inline]
-pub fn mut_offset<T>(ptr: *mut T, count: int) -> *mut T {
+pub fn mut_offset<T>(ptr: *mut T, count: isize) -> *mut T {
     use std::mem::size_of;
-    (ptr as int + count * (size_of::<T>() as int)) as *mut T
+    (ptr as isize + count * (size_of::<T>() as isize)) as *mut T
 }
