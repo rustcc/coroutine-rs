@@ -3,3 +3,10 @@
 name = "coroutine-rs"
 version = "0.0.1"
 authors = ["Rustcc Developers"]
+license = "MIT/ISC"
+repository = "https://github.com/rustcc/coroutine-rs"
+description = "Coroutine Library in Rust"
+
+[lib]
+
+name = "coroutine"
