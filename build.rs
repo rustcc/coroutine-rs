@@ -1,38 +1,28 @@
-#![feature(path)]
+#![feature(path, env)]
 extern crate gcc;
 
-use std::path::Path;
+use std::path::PathBuf;
+use std::env;
 
-const PATH: &'static str = "src/asm";
-const ASM_FILE: &'static str = "_context.S";
 const LIB_NAME: &'static str = "libctxswtch.a";
 
 fn main() {
-    compile();
-}
+    let arch =
+        if cfg!(target_arch = "x86_64") {
+            "x86_64"
+        } else if cfg!(target_arch = "i686") {
+            "i686"
+        } else if cfg!(target_arch = "arm") {
+            "arm"
+        } else if cfg!(target_arch = "mips") {
+            "mips"
+        } else if cfg!(target_arch = "mipsel") {
+            "mipsel"
+        } else {
+            panic!("Unsupported architecture: {}", env::var("TARGET").unwrap());
+        };
+    let src_path = &["src", "asm", arch, "_context.S"].iter().collect::<PathBuf>();
+    gcc::compile_library(LIB_NAME, &[src_path.to_str().unwrap()]);
 
-#[cfg(target_arch="x86_64")]
-fn compile() {
-    gcc::compile_library(LIB_NAME, &[Path::new(&format!("{path}/{arch}/{asm_file}", path = PATH, arch = "x86_64", asm_file = ASM_FILE)).to_str().unwrap()]);
+    println!("cargo:rustc-flags=-l ctxswtch:static");
 }
-    
-#[cfg(target_arch="x86")]
-fn compile() {
-    gcc::compile_library(LIB_NAME, &[Path::new(&format!("{path}/{arch}/{asm_file}", path = PATH, arch = "i686", asm_file = ASM_FILE)).to_str().unwrap()]);
-}
-    
-#[cfg(target_arch="arm")]
-fn compile() {
-    gcc::compile_library(LIB_NAME, &[Path::new(&format!("{path}/{arch}/{asm_file}", path = PATH, arch = "arm", asm_file = ASM_FILE)).to_str().unwrap()]);
-}
-    
-#[cfg(target_arch="mips")]
-fn compile() {
-    gcc::compile_library(LIB_NAME, &[Path::new(&format!("{path}/{arch}/{asm_file}", path = PATH, arch = "mips", asm_file = ASM_FILE)).to_str().unwrap()]);
-}
-    
-#[cfg(target_arch="mipsel")]
-fn compile() {
-    gcc::compile_library(LIB_NAME, &[Path::new(&format!("{path}/{arch}/{asm_file}", path = PATH, arch = "mipsel", asm_file = ASM_FILE)).to_str().unwrap()]);
-}
-    

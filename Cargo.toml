@@ -8,7 +8,6 @@ description = "Coroutine Library in Rust"
 readme = "README.md"
 documentation = "https://github.com/rustcc/coroutine-rs/blob/master/README.md"
 homepage = "https://github.com/rustcc/coroutine-rs"
-
 build = "build.rs"
 
 [build-dependencies]
