@@ -1,0 +1,5 @@
+[package]
+
+name = "coroutine-rs"
+version = "0.0.1"
+authors = ["Rustcc Developers"]
