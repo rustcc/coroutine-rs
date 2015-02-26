@@ -161,7 +161,7 @@ struct Registers {
 
 #[cfg(target_arch = "x86")]
 impl Registers {
-    pub fn new() -> Registers {
+    fn new() -> Registers {
         Registers {
             eax: 0, ebx: 0, ecx: 0, edx: 0,
             ebp: 0, esi: 0, edi: 0, esp: 0,
@@ -273,6 +273,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
 }
 
 #[cfg(target_arch = "arm")]
+#[repr(C)]
 struct Registers([libc::uintptr_t; 32]);
 
 #[cfg(target_arch = "arm")]
@@ -309,6 +310,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
 
 #[cfg(any(target_arch = "mips",
           target_arch = "mipsel"))]
+#[repr(C)]
 struct Registers([libc::uintptr_t; 32]);
 
 #[cfg(any(target_arch = "mips",
