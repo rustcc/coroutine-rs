@@ -34,28 +34,21 @@ pub struct Context {
 
 pub type InitFn = extern "C" fn(usize, *mut (), *mut ()) -> !;
 
-extern "C" fn bridge_to_c(func: *mut libc::c_void) {
-    use std::mem::transmute;
-
-    let f: Box<Thunk> = unsafe {transmute(func)};
-    f.invoke(());
-}
-
 impl Context {
     pub fn empty() -> Context {
         Context {
-            regs: new_regs(),
+            regs: box Registers::new(),
             stack_bounds: None,
         }
     }
 
-    /// Create a new context that will resume execution by running proc()
+    /// Create a new context that will resume execution by running start
     ///
     /// The `init` function will be run with `arg` and the `start` procedure
-    /// split up isizeo code and env poisizeers. It is required that the `init`
+    /// split up into code and env pointers. It is required that the `init`
     /// function never return.
     ///
-    /// FIXME: this is basically an awful the isizeerface. The main reason for
+    /// FIXME: this is basically an awful the interface. The main reason for
     ///        this is to reduce the number of allocations made when a green
     ///        task is spawned as much as possible
     pub fn new<F: FnOnce() + Send>(init: InitFn, arg: usize, start: F,
@@ -65,7 +58,7 @@ impl Context {
         let sp: *mut usize = sp as *mut usize;
         // Save and then immediately load the current context,
         // which we will then modify to call the given function when restored
-        let mut regs = new_regs();
+        let mut regs = box Registers::new();
 
         initialize_call_frame(&mut *regs,
                               init,
@@ -167,12 +160,14 @@ struct Registers {
 }
 
 #[cfg(target_arch = "x86")]
-fn new_regs() -> Box<Registers> {
-    box Registers {
-        eax: 0, ebx: 0, ecx: 0, edx: 0,
-        ebp: 0, esi: 0, edi: 0, esp: 0,
-        cs: 0, ds: 0, ss: 0, es: 0, fs: 0, gs: 0,
-        eflags: 0, eip: 0
+impl Registers {
+    pub fn new() -> Registers {
+        Registers {
+            eax: 0, ebx: 0, ecx: 0, edx: 0,
+            ebp: 0, esi: 0, edi: 0, esp: 0,
+            cs: 0, ds: 0, ss: 0, es: 0, fs: 0, gs: 0,
+            eflags: 0, eip: 0,
+        }
     }
 }
 
@@ -203,28 +198,34 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
 #[cfg(all(windows, target_arch = "x86_64"))]
 #[repr(C)]
 struct Registers {
-    gpr:[libc::uintptr_t; 14],
-    _xmm:[simd::u32x4; 10]
-}
-#[cfg(all(not(windows), target_arch = "x86_64"))]
-#[repr(C)]
-struct Registers {
-    gpr:[libc::uintptr_t; 10],
-    _xmm:[simd::u32x4; 6]
+    gpr: [libc::uintptr_t; 14],
+    _xmm: [simd::u32x4; 10]
 }
 
 #[cfg(all(windows, target_arch = "x86_64"))]
-fn new_regs() -> Box<Registers> {
-    box() Registers {
-        gpr:[0; 14],
-        _xmm:[simd::u32x4(0,0,0,0); 10]
+impl Registers {
+    fn new() -> Registers {
+        Registers {
+            gpr: [0; 14],
+            _xmm: [simd::u32x4(0,0,0,0); 10]
+        }
     }
 }
+
 #[cfg(all(not(windows), target_arch = "x86_64"))]
-fn new_regs() -> Box<Registers> {
-    box() Registers {
-        gpr:[0; 10],
-        _xmm:[simd::u32x4(0,0,0,0); 6]
+#[repr(C)]
+struct Registers {
+    gpr: [libc::uintptr_t; 10],
+    _xmm: [simd::u32x4; 6]
+}
+
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+impl Registers {
+    fn new() -> Registers {
+        Registers {
+            gpr: [0; 10],
+            _xmm: [simd::u32x4(0,0,0,0); 6]
+        }
     }
 }
 
@@ -272,10 +273,14 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
 }
 
 #[cfg(target_arch = "arm")]
-type Registers = [libc::uintptr_t; 32];
+struct Registers([libc::uintptr_t; 32]);
 
 #[cfg(target_arch = "arm")]
-fn new_regs() -> Box<Registers> { box {[0; 32]} }
+impl Registers {
+    fn new() -> Registers {
+        Registers([0; 32])
+    }
+}
 
 #[cfg(target_arch = "arm")]
 fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
@@ -288,6 +293,8 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
 
     // The final return address. 0 indicates the bottom of the stack
     unsafe { *sp = 0; }
+
+    let &mut Registers(ref mut regs) = regs;
 
     // ARM uses the same technique as x86_64 to have a landing pad for the start
     // of all new green tasks. Neither r1/r2 are saved on a context switch, so
@@ -302,11 +309,15 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
 
 #[cfg(any(target_arch = "mips",
           target_arch = "mipsel"))]
-type Registers = [libc::uintptr_t; 32];
+struct Registers([libc::uintptr_t; 32]);
 
 #[cfg(any(target_arch = "mips",
           target_arch = "mipsel"))]
-fn new_regs() -> Box<Registers> { box {[0; 32]} }
+impl Registers {
+    fn new() -> Registers {
+        Registers([0; 32])
+    }
+}
 
 #[cfg(any(target_arch = "mips",
           target_arch = "mipsel"))]
@@ -318,6 +329,8 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize,
 
     // The final return address. 0 indicates the bottom of the stack
     unsafe { *sp = 0; }
+
+    let &mut Registers(ref mut regs) = regs;
 
     regs[4] = arg as libc::uintptr_t;
     regs[5] = procedure.code as libc::uintptr_t;
@@ -335,6 +348,7 @@ fn align_down(sp: *mut usize) -> *mut usize {
 // ptr::mut_offset is positive isizes only
 #[inline]
 pub fn mut_offset<T>(ptr: *mut T, count: isize) -> *mut T {
-    use std::mem::size_of;
-    (ptr as isize + count * (size_of::<T>() as isize)) as *mut T
+    // use std::mem::size_of;
+    // (ptr as isize + count * (size_of::<T>() as isize)) as *mut T
+    unsafe { ptr.offset(count) }
 }

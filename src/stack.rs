@@ -78,13 +78,13 @@ impl Stack {
         (self.start() as usize + page_size()) as *const usize
     }
 
-    /// Poisize to the low end of the allocated stack
+    /// Point to the low end of the allocated stack
     pub fn start(&self) -> *const usize {
         self.buf.as_ref().map(|m| m.data() as *const usize)
             .unwrap_or(ptr::null())
     }
 
-    /// Poisize one usize beyond the high end of the allocated stack
+    /// Point one usize beyond the high end of the allocated stack
     pub fn end(&self) -> *const usize {
         self.buf.as_ref().map(|buf| unsafe {
             buf.data().offset(buf.len() as isize) as *const usize
