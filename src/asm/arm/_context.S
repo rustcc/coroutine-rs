@@ -63,7 +63,8 @@ SWAP_REGISTERS:
 // For reasons of this existence, see the comments in x86_64/_context.S
 .globl BOOTSTRAP_TASK
 BOOTSTRAP_TASK:
-    mov r0, r0
-    mov r1, r3
-    mov r2, r4
+	mov r0, r0
+	mov r1, r3
+// no need for the second argument
+//    mov r2, r4
     mov pc, r5

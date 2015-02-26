@@ -186,7 +186,8 @@ SWAP_REGISTERS:
 #endif
 .globl BOOTSTRAP
 BOOTSTRAP:
-    mov %r12, RUSTRT_ARG0_S
-    mov %r13, RUSTRT_ARG1_S
-    mov %r14, RUSTRT_ARG2_S
-    jmpq *%r15
+	mov %r12, RUSTRT_ARG0_S
+	mov %r13, RUSTRT_ARG1_S
+// no need for the second argument
+//    mov %r14, RUSTRT_ARG2_S
+	jmpq *%r14
