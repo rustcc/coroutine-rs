@@ -11,14 +11,13 @@
 use stack::Stack;
 use std::usize;
 use std::mem::transmute;
-// use std::rt::stack;
-use std::raw;
 #[cfg(target_arch = "x86_64")]
 use std::simd;
-mod thunk;
-use thunk::Thunk;
+use std::thunk::Thunk;
 
 use libc;
+
+use sys;
 
 // FIXME #7761: Registers is boxed so that it is 16-byte aligned, for storing
 // SSE regs.  It would be marginally better not to do this. In C++ we
@@ -52,15 +51,14 @@ impl Context {
     /// FIXME: this is basically an awful the interface. The main reason for
     ///        this is to reduce the number of allocations made when a green
     ///        task is spawned as much as possible
-    pub fn new<'a,A,R>(init: InitFn, arg: usize, start: Thunk<'a,A,R>, stack: &mut Stack) -> Context {
-
+    pub fn new<F: FnOnce() + Send>(init: InitFn, arg: usize, start: F, stack: &mut Stack) -> Context {
         let sp: *const usize = stack.end();
         let sp: *mut usize = sp as *mut usize;
         // Save and then immediately load the current context,
         // which we will then modify to call the given function when restored
         let mut regs = box Registers::new();
 
-        initialize_call_frame(&mut regs, init, arg, unsafe { transmute(Box::new(start)) }, sp);
+        initialize_call_frame(&mut regs, init, arg, unsafe { transmute(Box::new(Thunk::new(start))) }, sp);
 
         // Scheduler tasks don't have a stack in the "we allocated it" sense,
         // but rather they run on pthreads stacks. We have complete control over
@@ -68,11 +66,12 @@ impl Context {
         // overflow). Additionally, their coroutine stacks are listed as being
         // zero-length, so that's how we detect what's what here.
         let stack_base: *const usize = stack.start();
-        let bounds = if sp as libc::uintptr_t == stack_base as libc::uintptr_t {
-            None
-        } else {
-            Some((stack_base as usize, sp as usize))
-        };
+        let bounds =
+            if sp as libc::uintptr_t == stack_base as libc::uintptr_t {
+                None
+            } else {
+                Some((stack_base as usize, sp as usize))
+            };
         return Context {
             regs: regs,
             stack_bounds: bounds,
@@ -104,15 +103,13 @@ impl Context {
             // invalid for the current task. Lucky for us `rust_swap_registers`
             // is a C function so we don't have to worry about that!
             //
-            // FIXME: the `std::rt::stack` is already gone!
-            //
-            // match in_context.stack_bounds {
-            //     Some((lo, hi)) => stack::record_rust_managed_stack_bounds(lo, hi),
-            //     // If we're going back to one of the original contexts or
-            //     // something that's possibly not a "normal task", then reset
-            //     // the stack limit to 0 to make morestack never fail
-            //     None => stack::record_rust_managed_stack_bounds(0, usize::MAX),
-            // }
+            match in_context.stack_bounds {
+                Some((lo, hi)) => sys::stack::record_rust_managed_stack_bounds(lo, hi),
+                // If we're going back to one of the original contexts or
+                // something that's possibly not a "normal task", then reset
+                // the stack limit to 0 to make morestack never fail
+                None => sys::stack::record_rust_managed_stack_bounds(0, usize::MAX),
+            }
             rust_swap_registers(out_regs, in_regs)
         }
     }
@@ -234,7 +231,7 @@ impl Registers {
 fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkptr: *mut (), sp: *mut usize) {
     extern { fn rust_bootstrap_green_task(); } // use an indirection because the call contract differences between windows and linux
     // TODO: use rust's condition compile attribute instead
-    
+
     // Redefinitions from rt/arch/x86_64/regs.h
     static RUSTRT_RSP: usize = 1;
     static RUSTRT_IP: usize = 8;
@@ -242,7 +239,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
     static RUSTRT_R12: usize = 4;
     static RUSTRT_R13: usize = 5;
     static RUSTRT_R14: usize = 6;
-    static RUSTRT_R15: usize = 7;
+    // static RUSTRT_R15: usize = 7;
 
     let sp = align_down(sp);
     let sp = mut_offset(sp, -1);
@@ -349,4 +346,49 @@ pub fn mut_offset<T>(ptr: *mut T, count: isize) -> *mut T {
     // use std::mem::size_of;
     // (ptr as isize + count * (size_of::<T>() as isize)) as *mut T
     unsafe { ptr.offset(count) }
+}
+
+#[cfg(test)]
+mod test {
+    use std::thunk::Thunk;
+    use std::mem::transmute;
+    use std::sync::mpsc::channel;
+    use std::rt::util::min_stack;
+    use std::rt::unwind::try;
+    use std::boxed::BoxAny;
+
+    use stack::Stack;
+    use context::Context;
+
+    #[test]
+    fn test_swap_context() {
+
+        extern fn init_fn(arg: usize, f: *mut ()) -> ! {
+            let func: Box<Thunk> = unsafe { transmute(f) };
+            if let Err(cause) = unsafe { try(move|| func.invoke(())) } {
+                error!("Panicked inside: {:?}", cause.downcast::<&str>());
+            }
+
+            let ctx: &Context = unsafe { transmute(arg) };
+
+            let mut dummy = Context::empty();
+            Context::swap(&mut dummy, ctx);
+
+            unreachable!();
+        }
+
+        let mut cur = Context::empty();
+        let (tx, rx) = channel();
+
+        let mut stk = Stack::new(min_stack());
+        let ctx = Context::new(init_fn, unsafe { transmute(&cur) }, move|| {
+            tx.send(1).unwrap();
+        }, &mut stk);
+
+        assert!(rx.try_recv().is_err());
+
+        Context::swap(&mut cur, &ctx);
+
+        assert_eq!(rx.recv().unwrap(), 1);
+    }
 }

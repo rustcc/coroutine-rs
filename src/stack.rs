@@ -29,8 +29,7 @@ pub struct Stack {
 // DragonFly BSD also seems to suffer from the same problem. When MAP_STACK is
 // used, it returns the same `ptr` multiple times.
 #[cfg(all(not(windows), not(target_os = "freebsd"), not(target_os = "dragonfly")))]
-static STACK_FLAGS: libc::c_int = libc::MAP_STACK | libc::MAP_PRIVATE |
-                                  libc::MAP_ANON;
+static STACK_FLAGS: libc::c_int = libc::MAP_STACK | libc::MAP_PRIVATE | libc::MAP_ANON;
 #[cfg(any(target_os = "freebsd",
           target_os = "dragonfly"))]
 static STACK_FLAGS: libc::c_isize = libc::MAP_PRIVATE | libc::MAP_ANON;
@@ -45,8 +44,9 @@ impl Stack {
         // allocation failure, which would fail to spawn the task. But there's
         // not many sensible things to do on OOM.  Failure seems fine (and is
         // what the old stack allocation did).
-        let stack = match MemoryMap::new(size, &[MapOption::MapReadable, MapOption::MapWritable,
-                                         MapOption::MapNonStandardFlags(STACK_FLAGS)]) {
+        let stack = match MemoryMap::new(size, &[MapOption::MapReadable,
+                                                 MapOption::MapWritable,
+                                                 MapOption::MapNonStandardFlags(STACK_FLAGS)]) {
             Ok(map) => map,
             Err(e) => panic!("mmap for stack of size {} failed: {}", size, e)
         };
@@ -80,15 +80,19 @@ impl Stack {
 
     /// Point to the low end of the allocated stack
     pub fn start(&self) -> *const usize {
-        self.buf.as_ref().map(|m| m.data() as *const usize)
+        self.buf.as_ref()
+            .map(|m| m.data() as *const usize)
             .unwrap_or(ptr::null())
     }
 
     /// Point one usize beyond the high end of the allocated stack
     pub fn end(&self) -> *const usize {
-        self.buf.as_ref().map(|buf| unsafe {
-            buf.data().offset(buf.len() as isize) as *const usize
-        }).unwrap_or(ptr::null())
+        self.buf
+            .as_ref()
+            .map(|buf| unsafe {
+                buf.data().offset(buf.len() as isize) as *const usize
+            })
+            .unwrap_or(ptr::null())
     }
 }
 

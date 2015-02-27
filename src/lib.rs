@@ -206,438 +206,439 @@
 //! # }
 //! ```
 
-#![license = "MIT/ASL2"]
+// #![license = "MIT/ASL2"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
-#![feature(box_syntax, std_misc, os, libc, env)]
+#![feature(box_syntax, std_misc, os, libc, env, asm, core)]
 
 #[macro_use] extern crate log;
 extern crate libc;
-extern crate alloc;
-extern crate native;
+// extern crate alloc;
+// extern crate native;
 
-use std::mem::replace;
-use std::os;
-use std::rt::task::TaskOpts;
-use std::rt::thread::Thread;
-use std::rt;
-use std::sync::Arc;
-use std::sync::atomic::{SeqCst, AtomicUint, INIT_ATOMIC_UINT};
-use std::sync::deque;
-use std::task::{TaskBuilder, Spawner};
+// use std::mem::replace;
+// use std::os;
+// use std::rt::task::TaskOpts;
+// use std::rt::thread::Thread;
+// use std::rt;
+// use std::sync::Arc;
+// use std::sync::atomic::{SeqCst, AtomicUint, INIT_ATOMIC_UINT};
+// use std::sync::deque;
+// use std::task::{TaskBuilder, Spawner};
 
-use sched::{Shutdown, Scheduler, SchedHandle, TaskFromFriend, PinnedTask, NewNeighbor};
-use sleeper_list::SleeperList;
-use stack::StackPool;
-use task::GreenTask;
+// use sched::{Shutdown, Scheduler, SchedHandle, TaskFromFriend, PinnedTask, NewNeighbor};
+// use sleeper_list::SleeperList;
+// use stack::StackPool;
+// use task::GreenTask;
 
-mod macros;
-mod simple;
-mod message_queue;
+// mod macros;
+// mod simple;
+// mod message_queue;
 
-pub mod basic;
+// pub mod basic;
 pub mod context;
-pub mod coroutine;
-pub mod sched;
-pub mod sleeper_list;
+// // pub mod coroutine;
+// pub mod sched;
+// pub mod sleeper_list;
 pub mod stack;
-pub mod task;
+// pub mod task;
+mod sys;
 
-/// A helper macro for booting a program with libgreen
-///
-/// # Example
-///
-/// ```rust,ignore
-/// #![feature(phase)]
-/// #[phase(plugin)] extern crate green;
-///
-/// green_start!(main)
-///
-/// fn main() {
-///     // running with libgreen
-/// }
-/// ```
-#[macro_export]
-macro_rules! green_start( ($f:ident) => (
-    mod __start {
-        extern crate green;
-        extern crate rustuv;
+// /// A helper macro for booting a program with libgreen
+// ///
+// /// # Example
+// ///
+// /// ```rust,ignore
+// /// #![feature(phase)]
+// /// #[phase(plugin)] extern crate green;
+// ///
+// /// green_start!(main)
+// ///
+// /// fn main() {
+// ///     // running with libgreen
+// /// }
+// /// ```
+// #[macro_export]
+// macro_rules! green_start( ($f:ident) => (
+//     mod __start {
+//         extern crate green;
+//         extern crate rustuv;
 
-        #[start]
-        fn start(argc: int, argv: *const *const u8) -> int {
-            green::start(argc, argv, rustuv::event_loop, super::$f)
-        }
-    }
-) )
+//         #[start]
+//         fn start(argc: int, argv: *const *const u8) -> int {
+//             green::start(argc, argv, rustuv::event_loop, super::$f)
+//         }
+//     }
+// ) )
 
-/// Set up a default runtime configuration, given compiler-supplied arguments.
-///
-/// This function will block until the entire pool of M:N schedulers have
-/// exited. This function also requires a local task to be available.
-///
-/// # Arguments
-///
-/// * `argc` & `argv` - The argument vector. On Unix this information is used
-///   by os::args.
-/// * `main` - The initial procedure to run inside of the M:N scheduling pool.
-///            Once this procedure exits, the scheduling pool will begin to shut
-///            down. The entire pool (and this function) will only return once
-///            all child tasks have finished executing.
-///
-/// # Return value
-///
-/// The return value is used as the process return code. 0 on success, 101 on
-/// error.
-pub fn start(argc: int, argv: *const *const u8,
-             event_loop_factory: fn() -> Box<EventLoop + Send>,
-             main: proc():Send) -> int {
-    rt::init(argc, argv);
-    let mut main = Some(main);
-    let mut ret = None;
-    simple::task().run(|| {
-        ret = Some(run(event_loop_factory, main.take().unwrap()));
-    }).destroy();
-    // unsafe is ok b/c we're sure that the runtime is gone
-    unsafe { rt::cleanup() }
-    ret.unwrap()
-}
+// /// Set up a default runtime configuration, given compiler-supplied arguments.
+// ///
+// /// This function will block until the entire pool of M:N schedulers have
+// /// exited. This function also requires a local task to be available.
+// ///
+// /// # Arguments
+// ///
+// /// * `argc` & `argv` - The argument vector. On Unix this information is used
+// ///   by os::args.
+// /// * `main` - The initial procedure to run inside of the M:N scheduling pool.
+// ///            Once this procedure exits, the scheduling pool will begin to shut
+// ///            down. The entire pool (and this function) will only return once
+// ///            all child tasks have finished executing.
+// ///
+// /// # Return value
+// ///
+// /// The return value is used as the process return code. 0 on success, 101 on
+// /// error.
+// pub fn start(argc: int, argv: *const *const u8,
+//              event_loop_factory: fn() -> Box<EventLoop + Send>,
+//              main: proc():Send) -> int {
+//     rt::init(argc, argv);
+//     let mut main = Some(main);
+//     let mut ret = None;
+//     simple::task().run(|| {
+//         ret = Some(run(event_loop_factory, main.take().unwrap()));
+//     }).destroy();
+//     // unsafe is ok b/c we're sure that the runtime is gone
+//     unsafe { rt::cleanup() }
+//     ret.unwrap()
+// }
 
-/// Execute the main function in a pool of M:N schedulers.
-///
-/// Configures the runtime according to the environment, by default using a task
-/// scheduler with the same number of threads as cores.  Returns a process exit
-/// code.
-///
-/// This function will not return until all schedulers in the associated pool
-/// have returned.
-pub fn run(event_loop_factory: fn() -> Box<EventLoop + Send>,
-           main: proc():Send) -> int {
-    // Create a scheduler pool and spawn the main task into this pool. We will
-    // get notified over a channel when the main task exits.
-    let mut cfg = PoolConfig::new();
-    cfg.event_loop_factory = event_loop_factory;
-    let mut pool = SchedPool::new(cfg);
-    let (tx, rx) = channel();
-    let mut opts = TaskOpts::new();
-    opts.on_exit = Some(proc(r) tx.send(r));
-    opts.name = Some("<main>".into_maybe_owned());
-    pool.spawn(opts, main);
+// /// Execute the main function in a pool of M:N schedulers.
+// ///
+// /// Configures the runtime according to the environment, by default using a task
+// /// scheduler with the same number of threads as cores.  Returns a process exit
+// /// code.
+// ///
+// /// This function will not return until all schedulers in the associated pool
+// /// have returned.
+// pub fn run(event_loop_factory: fn() -> Box<EventLoop + Send>,
+//            main: proc():Send) -> int {
+//     // Create a scheduler pool and spawn the main task into this pool. We will
+//     // get notified over a channel when the main task exits.
+//     let mut cfg = PoolConfig::new();
+//     cfg.event_loop_factory = event_loop_factory;
+//     let mut pool = SchedPool::new(cfg);
+//     let (tx, rx) = channel();
+//     let mut opts = TaskOpts::new();
+//     opts.on_exit = Some(proc(r) tx.send(r));
+//     opts.name = Some("<main>".into_maybe_owned());
+//     pool.spawn(opts, main);
 
-    // Wait for the main task to return, and set the process error code
-    // appropriately.
-    if rx.recv().is_err() {
-        os::set_exit_status(rt::DEFAULT_ERROR_CODE);
-    }
+//     // Wait for the main task to return, and set the process error code
+//     // appropriately.
+//     if rx.recv().is_err() {
+//         os::set_exit_status(rt::DEFAULT_ERROR_CODE);
+//     }
 
-    // Now that we're sure all tasks are dead, shut down the pool of schedulers,
-    // waiting for them all to return.
-    pool.shutdown();
-    os::get_exit_status()
-}
+//     // Now that we're sure all tasks are dead, shut down the pool of schedulers,
+//     // waiting for them all to return.
+//     pool.shutdown();
+//     os::get_exit_status()
+// }
 
-/// Configuration of how an M:N pool of schedulers is spawned.
-pub struct PoolConfig {
-    /// The number of schedulers (OS threads) to spawn into this M:N pool.
-    pub threads: uint,
-    /// A factory function used to create new event loops. If this is not
-    /// specified then the default event loop factory is used.
-    pub event_loop_factory: fn() -> Box<EventLoop + Send>,
-}
+// /// Configuration of how an M:N pool of schedulers is spawned.
+// pub struct PoolConfig {
+//     /// The number of schedulers (OS threads) to spawn into this M:N pool.
+//     pub threads: uint,
+//     /// A factory function used to create new event loops. If this is not
+//     /// specified then the default event loop factory is used.
+//     pub event_loop_factory: fn() -> Box<EventLoop + Send>,
+// }
 
-impl PoolConfig {
-    /// Returns the default configuration, as determined the environment
-    /// variables of this process.
-    pub fn new() -> PoolConfig {
-        PoolConfig {
-            threads: rt::default_sched_threads(),
-            event_loop_factory: basic::event_loop,
-        }
-    }
-}
+// impl PoolConfig {
+//     /// Returns the default configuration, as determined the environment
+//     /// variables of this process.
+//     pub fn new() -> PoolConfig {
+//         PoolConfig {
+//             threads: rt::default_sched_threads(),
+//             event_loop_factory: basic::event_loop,
+//         }
+//     }
+// }
 
-/// A structure representing a handle to a pool of schedulers. This handle is
-/// used to keep the pool alive and also reap the status from the pool.
-pub struct SchedPool {
-    id: uint,
-    threads: Vec<Thread<()>>,
-    handles: Vec<SchedHandle>,
-    stealers: Vec<deque::Stealer<Box<task::GreenTask>>>,
-    next_friend: uint,
-    stack_pool: StackPool,
-    deque_pool: deque::BufferPool<Box<task::GreenTask>>,
-    sleepers: SleeperList,
-    factory: fn() -> Box<EventLoop + Send>,
-    task_state: TaskState,
-    tasks_done: Receiver<()>,
-}
+// /// A structure representing a handle to a pool of schedulers. This handle is
+// /// used to keep the pool alive and also reap the status from the pool.
+// pub struct SchedPool {
+//     id: uint,
+//     threads: Vec<Thread<()>>,
+//     handles: Vec<SchedHandle>,
+//     stealers: Vec<deque::Stealer<Box<task::GreenTask>>>,
+//     next_friend: uint,
+//     stack_pool: StackPool,
+//     deque_pool: deque::BufferPool<Box<task::GreenTask>>,
+//     sleepers: SleeperList,
+//     factory: fn() -> Box<EventLoop + Send>,
+//     task_state: TaskState,
+//     tasks_done: Receiver<()>,
+// }
 
-/// This is an internal state shared among a pool of schedulers. This is used to
-/// keep track of how many tasks are currently running in the pool and then
-/// sending on a channel once the entire pool has been drained of all tasks.
-#[deriving(Clone)]
-pub struct TaskState {
-    cnt: Arc<AtomicUint>,
-    done: Sender<()>,
-}
+// /// This is an internal state shared among a pool of schedulers. This is used to
+// /// keep track of how many tasks are currently running in the pool and then
+// /// sending on a channel once the entire pool has been drained of all tasks.
+// #[deriving(Clone)]
+// pub struct TaskState {
+//     cnt: Arc<AtomicUint>,
+//     done: Sender<()>,
+// }
 
-impl SchedPool {
-    /// Execute the main function in a pool of M:N schedulers.
-    ///
-    /// This will configure the pool according to the `config` parameter, and
-    /// initially run `main` inside the pool of schedulers.
-    pub fn new(config: PoolConfig) -> SchedPool {
-        static mut POOL_ID: AtomicUint = INIT_ATOMIC_UINT;
+// impl SchedPool {
+//     /// Execute the main function in a pool of M:N schedulers.
+//     ///
+//     /// This will configure the pool according to the `config` parameter, and
+//     /// initially run `main` inside the pool of schedulers.
+//     pub fn new(config: PoolConfig) -> SchedPool {
+//         static mut POOL_ID: AtomicUint = INIT_ATOMIC_UINT;
 
-        let PoolConfig {
-            threads: nscheds,
-            event_loop_factory: factory
-        } = config;
-        assert!(nscheds > 0);
+//         let PoolConfig {
+//             threads: nscheds,
+//             event_loop_factory: factory
+//         } = config;
+//         assert!(nscheds > 0);
 
-        // The pool of schedulers that will be returned from this function
-        let (p, state) = TaskState::new();
-        let mut pool = SchedPool {
-            threads: vec![],
-            handles: vec![],
-            stealers: vec![],
-            id: unsafe { POOL_ID.fetch_add(1, SeqCst) },
-            sleepers: SleeperList::new(),
-            stack_pool: StackPool::new(),
-            deque_pool: deque::BufferPool::new(),
-            next_friend: 0,
-            factory: factory,
-            task_state: state,
-            tasks_done: p,
-        };
+//         // The pool of schedulers that will be returned from this function
+//         let (p, state) = TaskState::new();
+//         let mut pool = SchedPool {
+//             threads: vec![],
+//             handles: vec![],
+//             stealers: vec![],
+//             id: unsafe { POOL_ID.fetch_add(1, SeqCst) },
+//             sleepers: SleeperList::new(),
+//             stack_pool: StackPool::new(),
+//             deque_pool: deque::BufferPool::new(),
+//             next_friend: 0,
+//             factory: factory,
+//             task_state: state,
+//             tasks_done: p,
+//         };
 
-        // Create a work queue for each scheduler, ntimes. Create an extra
-        // for the main thread if that flag is set. We won't steal from it.
-        let mut workers = Vec::with_capacity(nscheds);
-        let mut stealers = Vec::with_capacity(nscheds);
+//         // Create a work queue for each scheduler, ntimes. Create an extra
+//         // for the main thread if that flag is set. We won't steal from it.
+//         let mut workers = Vec::with_capacity(nscheds);
+//         let mut stealers = Vec::with_capacity(nscheds);
 
-        for _ in range(0, nscheds) {
-            let (w, s) = pool.deque_pool.deque();
-            workers.push(w);
-            stealers.push(s);
-        }
-        pool.stealers = stealers;
+//         for _ in range(0, nscheds) {
+//             let (w, s) = pool.deque_pool.deque();
+//             workers.push(w);
+//             stealers.push(s);
+//         }
+//         pool.stealers = stealers;
 
-        // Now that we've got all our work queues, create one scheduler per
-        // queue, spawn the scheduler into a thread, and be sure to keep a
-        // handle to the scheduler and the thread to keep them alive.
-        for worker in workers.into_iter() {
-            rtdebug!("inserting a regular scheduler");
+//         // Now that we've got all our work queues, create one scheduler per
+//         // queue, spawn the scheduler into a thread, and be sure to keep a
+//         // handle to the scheduler and the thread to keep them alive.
+//         for worker in workers.into_iter() {
+//             rtdebug!("inserting a regular scheduler");
 
-            let mut sched = box Scheduler::new(pool.id,
-                                            (pool.factory)(),
-                                            worker,
-                                            pool.stealers.clone(),
-                                            pool.sleepers.clone(),
-                                            pool.task_state.clone());
-            pool.handles.push(sched.make_handle());
-            pool.threads.push(Thread::start(proc() { sched.bootstrap(); }));
-        }
+//             let mut sched = box Scheduler::new(pool.id,
+//                                             (pool.factory)(),
+//                                             worker,
+//                                             pool.stealers.clone(),
+//                                             pool.sleepers.clone(),
+//                                             pool.task_state.clone());
+//             pool.handles.push(sched.make_handle());
+//             pool.threads.push(Thread::start(proc() { sched.bootstrap(); }));
+//         }
 
-        return pool;
-    }
+//         return pool;
+//     }
 
-    /// Creates a new task configured to run inside of this pool of schedulers.
-    /// This is useful to create a task which can then be sent to a specific
-    /// scheduler created by `spawn_sched` (and possibly pin it to that
-    /// scheduler).
-    #[deprecated = "use the green and green_pinned methods of GreenTaskBuilder instead"]
-    pub fn task(&mut self, opts: TaskOpts, f: proc():Send) -> Box<GreenTask> {
-        GreenTask::configure(&mut self.stack_pool, opts, f)
-    }
+//     /// Creates a new task configured to run inside of this pool of schedulers.
+//     /// This is useful to create a task which can then be sent to a specific
+//     /// scheduler created by `spawn_sched` (and possibly pin it to that
+//     /// scheduler).
+//     #[deprecated = "use the green and green_pinned methods of GreenTaskBuilder instead"]
+//     pub fn task(&mut self, opts: TaskOpts, f: proc():Send) -> Box<GreenTask> {
+//         GreenTask::configure(&mut self.stack_pool, opts, f)
+//     }
 
-    /// Spawns a new task into this pool of schedulers, using the specified
-    /// options to configure the new task which is spawned.
-    ///
-    /// New tasks are spawned in a round-robin fashion to the schedulers in this
-    /// pool, but tasks can certainly migrate among schedulers once they're in
-    /// the pool.
-    #[deprecated = "use the green and green_pinned methods of GreenTaskBuilder instead"]
-    pub fn spawn(&mut self, opts: TaskOpts, f: proc():Send) {
-        let task = self.task(opts, f);
+//     /// Spawns a new task into this pool of schedulers, using the specified
+//     /// options to configure the new task which is spawned.
+//     ///
+//     /// New tasks are spawned in a round-robin fashion to the schedulers in this
+//     /// pool, but tasks can certainly migrate among schedulers once they're in
+//     /// the pool.
+//     #[deprecated = "use the green and green_pinned methods of GreenTaskBuilder instead"]
+//     pub fn spawn(&mut self, opts: TaskOpts, f: proc():Send) {
+//         let task = self.task(opts, f);
 
-        // Figure out someone to send this task to
-        let idx = self.next_friend;
-        self.next_friend += 1;
-        if self.next_friend >= self.handles.len() {
-            self.next_friend = 0;
-        }
+//         // Figure out someone to send this task to
+//         let idx = self.next_friend;
+//         self.next_friend += 1;
+//         if self.next_friend >= self.handles.len() {
+//             self.next_friend = 0;
+//         }
 
-        // Jettison the task away!
-        self.handles[idx].send(TaskFromFriend(task));
-    }
+//         // Jettison the task away!
+//         self.handles[idx].send(TaskFromFriend(task));
+//     }
 
-    /// Spawns a new scheduler into this M:N pool. A handle is returned to the
-    /// scheduler for use. The scheduler will not exit as long as this handle is
-    /// active.
-    ///
-    /// The scheduler spawned will participate in work stealing with all of the
-    /// other schedulers currently in the scheduler pool.
-    pub fn spawn_sched(&mut self) -> SchedHandle {
-        let (worker, stealer) = self.deque_pool.deque();
-        self.stealers.push(stealer.clone());
+//     /// Spawns a new scheduler into this M:N pool. A handle is returned to the
+//     /// scheduler for use. The scheduler will not exit as long as this handle is
+//     /// active.
+//     ///
+//     /// The scheduler spawned will participate in work stealing with all of the
+//     /// other schedulers currently in the scheduler pool.
+//     pub fn spawn_sched(&mut self) -> SchedHandle {
+//         let (worker, stealer) = self.deque_pool.deque();
+//         self.stealers.push(stealer.clone());
 
-        // Tell all existing schedulers about this new scheduler so they can all
-        // steal work from it
-        for handle in self.handles.iter_mut() {
-            handle.send(NewNeighbor(stealer.clone()));
-        }
+//         // Tell all existing schedulers about this new scheduler so they can all
+//         // steal work from it
+//         for handle in self.handles.iter_mut() {
+//             handle.send(NewNeighbor(stealer.clone()));
+//         }
 
-        // Create the new scheduler, using the same sleeper list as all the
-        // other schedulers as well as having a stealer handle to all other
-        // schedulers.
-        let mut sched = box Scheduler::new(self.id,
-                                        (self.factory)(),
-                                        worker,
-                                        self.stealers.clone(),
-                                        self.sleepers.clone(),
-                                        self.task_state.clone());
-        let ret = sched.make_handle();
-        self.handles.push(sched.make_handle());
-        self.threads.push(Thread::start(proc() { sched.bootstrap() }));
+//         // Create the new scheduler, using the same sleeper list as all the
+//         // other schedulers as well as having a stealer handle to all other
+//         // schedulers.
+//         let mut sched = box Scheduler::new(self.id,
+//                                         (self.factory)(),
+//                                         worker,
+//                                         self.stealers.clone(),
+//                                         self.sleepers.clone(),
+//                                         self.task_state.clone());
+//         let ret = sched.make_handle();
+//         self.handles.push(sched.make_handle());
+//         self.threads.push(Thread::start(proc() { sched.bootstrap() }));
 
-        return ret;
-    }
+//         return ret;
+//     }
 
-    /// Consumes the pool of schedulers, waiting for all tasks to exit and all
-    /// schedulers to shut down.
-    ///
-    /// This function is required to be called in order to drop a pool of
-    /// schedulers, it is considered an error to drop a pool without calling
-    /// this method.
-    ///
-    /// This only waits for all tasks in *this pool* of schedulers to exit, any
-    /// native tasks or extern pools will not be waited on
-    pub fn shutdown(mut self) {
-        self.stealers = vec![];
+//     /// Consumes the pool of schedulers, waiting for all tasks to exit and all
+//     /// schedulers to shut down.
+//     ///
+//     /// This function is required to be called in order to drop a pool of
+//     /// schedulers, it is considered an error to drop a pool without calling
+//     /// this method.
+//     ///
+//     /// This only waits for all tasks in *this pool* of schedulers to exit, any
+//     /// native tasks or extern pools will not be waited on
+//     pub fn shutdown(mut self) {
+//         self.stealers = vec![];
 
-        // Wait for everyone to exit. We may have reached a 0-task count
-        // multiple times in the past, meaning there could be several buffered
-        // messages on the `tasks_done` port. We're guaranteed that after *some*
-        // message the current task count will be 0, so we just receive in a
-        // loop until everything is totally dead.
-        while self.task_state.active() {
-            self.tasks_done.recv();
-        }
+//         // Wait for everyone to exit. We may have reached a 0-task count
+//         // multiple times in the past, meaning there could be several buffered
+//         // messages on the `tasks_done` port. We're guaranteed that after *some*
+//         // message the current task count will be 0, so we just receive in a
+//         // loop until everything is totally dead.
+//         while self.task_state.active() {
+//             self.tasks_done.recv();
+//         }
 
-        // Now that everyone's gone, tell everything to shut down.
-        for mut handle in replace(&mut self.handles, vec![]).into_iter() {
-            handle.send(Shutdown);
-        }
-        for thread in replace(&mut self.threads, vec![]).into_iter() {
-            thread.join();
-        }
-    }
-}
+//         // Now that everyone's gone, tell everything to shut down.
+//         for mut handle in replace(&mut self.handles, vec![]).into_iter() {
+//             handle.send(Shutdown);
+//         }
+//         for thread in replace(&mut self.threads, vec![]).into_iter() {
+//             thread.join();
+//         }
+//     }
+// }
 
-impl TaskState {
-    pub fn new() -> (Receiver<()>, TaskState) {
-        let (tx, rx) = channel();
-        (rx, TaskState {
-            cnt: Arc::new(AtomicUint::new(0)),
-            done: tx,
-        })
-    }
+// impl TaskState {
+//     pub fn new() -> (Receiver<()>, TaskState) {
+//         let (tx, rx) = channel();
+//         (rx, TaskState {
+//             cnt: Arc::new(AtomicUint::new(0)),
+//             done: tx,
+//         })
+//     }
 
-    fn increment(&mut self) {
-        self.cnt.fetch_add(1, SeqCst);
-    }
+//     fn increment(&mut self) {
+//         self.cnt.fetch_add(1, SeqCst);
+//     }
 
-    fn active(&self) -> bool {
-        self.cnt.load(SeqCst) != 0
-    }
+//     fn active(&self) -> bool {
+//         self.cnt.load(SeqCst) != 0
+//     }
 
-    fn decrement(&mut self) {
-        let prev = self.cnt.fetch_sub(1, SeqCst);
-        if prev == 1 {
-            self.done.send(());
-        }
-    }
-}
+//     fn decrement(&mut self) {
+//         let prev = self.cnt.fetch_sub(1, SeqCst);
+//         if prev == 1 {
+//             self.done.send(());
+//         }
+//     }
+// }
 
-impl Drop for SchedPool {
-    fn drop(&mut self) {
-        if self.threads.len() > 0 {
-            panic!("dropping a M:N scheduler pool that wasn't shut down");
-        }
-    }
-}
+// impl Drop for SchedPool {
+//     fn drop(&mut self) {
+//         if self.threads.len() > 0 {
+//             panic!("dropping a M:N scheduler pool that wasn't shut down");
+//         }
+//     }
+// }
 
-/// A spawner for green tasks
-pub struct GreenSpawner<'a>{
-    pool: &'a mut SchedPool,
-    handle: Option<&'a mut SchedHandle>
-}
+// /// A spawner for green tasks
+// pub struct GreenSpawner<'a>{
+//     pool: &'a mut SchedPool,
+//     handle: Option<&'a mut SchedHandle>
+// }
 
-impl<'a> Spawner for GreenSpawner<'a> {
-    #[inline]
-    fn spawn(self, opts: TaskOpts, f: proc():Send) {
-        let GreenSpawner { pool, handle } = self;
-        match handle {
-            None    => pool.spawn(opts, f),
-            Some(h) => h.send(PinnedTask(pool.task(opts, f)))
-        }
-    }
-}
+// impl<'a> Spawner for GreenSpawner<'a> {
+//     #[inline]
+//     fn spawn(self, opts: TaskOpts, f: proc():Send) {
+//         let GreenSpawner { pool, handle } = self;
+//         match handle {
+//             None    => pool.spawn(opts, f),
+//             Some(h) => h.send(PinnedTask(pool.task(opts, f)))
+//         }
+//     }
+// }
 
-/// An extension trait adding `green` configuration methods to `TaskBuilder`.
-pub trait GreenTaskBuilder {
-    fn green<'a>(self, &'a mut SchedPool) -> TaskBuilder<GreenSpawner<'a>>;
-    fn green_pinned<'a>(self, &'a mut SchedPool, &'a mut SchedHandle)
-                        -> TaskBuilder<GreenSpawner<'a>>;
-}
+// /// An extension trait adding `green` configuration methods to `TaskBuilder`.
+// pub trait GreenTaskBuilder {
+//     fn green<'a>(self, &'a mut SchedPool) -> TaskBuilder<GreenSpawner<'a>>;
+//     fn green_pinned<'a>(self, &'a mut SchedPool, &'a mut SchedHandle)
+//                         -> TaskBuilder<GreenSpawner<'a>>;
+// }
 
-impl<S: Spawner> GreenTaskBuilder for TaskBuilder<S> {
-    fn green<'a>(self, pool: &'a mut SchedPool) -> TaskBuilder<GreenSpawner<'a>> {
-        self.spawner(GreenSpawner {pool: pool, handle: None})
-    }
+// impl<S: Spawner> GreenTaskBuilder for TaskBuilder<S> {
+//     fn green<'a>(self, pool: &'a mut SchedPool) -> TaskBuilder<GreenSpawner<'a>> {
+//         self.spawner(GreenSpawner {pool: pool, handle: None})
+//     }
 
-    fn green_pinned<'a>(self, pool: &'a mut SchedPool, handle: &'a mut SchedHandle)
-                        -> TaskBuilder<GreenSpawner<'a>> {
-        self.spawner(GreenSpawner {pool: pool, handle: Some(handle)})
-    }
-}
+//     fn green_pinned<'a>(self, pool: &'a mut SchedPool, handle: &'a mut SchedHandle)
+//                         -> TaskBuilder<GreenSpawner<'a>> {
+//         self.spawner(GreenSpawner {pool: pool, handle: Some(handle)})
+//     }
+// }
 
-pub trait EventLoop {
-    fn run(&mut self);
-    fn callback(&mut self, arg: proc(): Send);
-    fn pausable_idle_callback(&mut self, cb: Box<Callback + Send>)
-                              -> Box<PausableIdleCallback + Send>;
-    fn remote_callback(&mut self, Box<Callback + Send>)
-                       -> Box<RemoteCallback + Send>;
-    fn has_active_io(&self) -> bool;
-}
+// pub trait EventLoop {
+//     fn run(&mut self);
+//     fn callback(&mut self, arg: proc(): Send);
+//     fn pausable_idle_callback(&mut self, cb: Box<Callback + Send>)
+//                               -> Box<PausableIdleCallback + Send>;
+//     fn remote_callback(&mut self, Box<Callback + Send>)
+//                        -> Box<RemoteCallback + Send>;
+//     fn has_active_io(&self) -> bool;
+// }
 
-pub trait PausableIdleCallback {
-    fn pause(&mut self);
-    fn resume(&mut self);
-}
+// pub trait PausableIdleCallback {
+//     fn pause(&mut self);
+//     fn resume(&mut self);
+// }
 
-pub trait RemoteCallback {
-    fn fire(&mut self);
-}
+// pub trait RemoteCallback {
+//     fn fire(&mut self);
+// }
 
-pub trait Callback {
-    fn call(&mut self);
-}
+// pub trait Callback {
+//     fn call(&mut self);
+// }
 
-#[cfg(test)]
-mod test {
-    use std::task::TaskBuilder;
-    use super::{SchedPool, PoolConfig, GreenTaskBuilder};
+// #[cfg(test)]
+// mod test {
+//     use std::task::TaskBuilder;
+//     use super::{SchedPool, PoolConfig, GreenTaskBuilder};
 
-    #[test]
-    fn test_green_builder() {
-        let mut pool = SchedPool::new(PoolConfig::new());
-        let res = TaskBuilder::new().green(&mut pool).try(proc() {
-            "Success!".to_string()
-        });
-        assert_eq!(res.ok().unwrap(), "Success!".to_string());
-        pool.shutdown();
-    }
-}
+//     #[test]
+//     fn test_green_builder() {
+//         let mut pool = SchedPool::new(PoolConfig::new());
+//         let res = TaskBuilder::new().green(&mut pool).try(proc() {
+//             "Success!".to_string()
+//         });
+//         assert_eq!(res.ok().unwrap(), "Success!".to_string());
+//         pool.shutdown();
+//     }
+// }
