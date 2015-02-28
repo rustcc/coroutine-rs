@@ -14,30 +14,23 @@ Basic usage of Coroutine
 ```rust
 extern crate coroutine;
 
-use coroutine::coroutine::Environment;
+use coroutine::coroutine::Coroutine;
 
 fn main() {
-    // Initialize a new environment
-    let mut env = Environment::new();
-
     // Spawn a new coroutine
-    let mut coro = env.spawn(move|env| {
-        // env is the environment that spawn this coroutine
+    let mut coro = Coroutine::spawn(move|| {
 
         println!("Hello in coroutine!");
 
         // Yield back to it's parent
-        env.yield_now();
+        Coroutine::sched();
 
         println!("We are back!!");
 
-        let subcoro = env.spawn(move|_| {
+        // Spawn a new coroutine
+        Coroutine::spawn(move|| {
             println!("Hello inside");
         });
-
-        // Destroy the coroutine and try to resue its stack
-        // It is optional but recommended
-        env.recycle(subcoro);
 
         println!("Good bye");
     });
@@ -45,9 +38,8 @@ fn main() {
     println!("We are here!");
 
     // Resume the coroutine
-    env.resume(&mut coro);
+    coro.resume();
 
     println!("Back to main.");
-    env.recycle(coro);
 }
 ```
