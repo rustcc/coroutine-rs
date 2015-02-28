@@ -1,17 +1,3 @@
-# coroutine-rs
-
-Coroutine library in Rust
-
-```toml
-[dependencies.coroutine-rs]
-git = "https://github.com/rustcc/coroutine-rs.git"
-```
-
-## Usage
-
-Basic usage of Coroutine
-
-```rust
 extern crate coroutine;
 
 use coroutine::coroutine::Environment;
@@ -50,4 +36,3 @@ fn main() {
     println!("Back to main.");
     env.recycle(coro);
 }
-```

@@ -17,12 +17,14 @@ use std::thunk::Thunk;
 use std::mem::transmute;
 use std::rt::unwind::try;
 use std::boxed::BoxAny;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
+use std::ptr;
 
 use context::Context;
 use stack::{StackPool, Stack};
 
 /// A coroutine is nothing more than a (register context, stack) pair.
+#[allow(raw_pointer_derive)]
 #[derive(Debug)]
 pub struct Coroutine {
     /// The segment of stack on which the task is currently running or
@@ -33,9 +35,11 @@ pub struct Coroutine {
     /// Always valid if the task is alive and not running.
     saved_context: Context,
 
-    parent_context: Context,
+    /// Parent coroutine, may always be valid.
+    parent: *mut Coroutine,
 }
 
+/// Coroutine spawn options
 #[derive(Debug)]
 pub struct Options {
     stack_size: usize,
@@ -49,21 +53,21 @@ impl Default for Options {
     }
 }
 
+/// Initialization function for make context
 extern "C" fn coroutine_initialize(arg: usize, f: *mut ()) -> ! {
-    let func: Box<Thunk<&mut Coroutine, _>> = unsafe { transmute(f) };
-    let coro: &mut Coroutine = unsafe { transmute(arg) };
+    let func: Box<Thunk<&mut Environment, _>> = unsafe { transmute(f) };
+    let environment: &mut Environment = unsafe { transmute(arg) };
 
-    let coro_mov = unsafe { transmute(arg) };
+    let env_mov = unsafe { transmute(arg) };
 
-    if let Err(cause) = unsafe { try(move|| func.invoke(coro_mov)) } {
+    if let Err(cause) = unsafe { try(move|| func.invoke(env_mov)) } {
         error!("Panicked inside: {:?}", cause.downcast::<&str>());
     }
 
     loop {
-        coro.yield_now();
+        // coro.yield_now();
+        environment.yield_now();
     }
-
-    unreachable!();
 }
 
 impl Coroutine {
@@ -71,35 +75,8 @@ impl Coroutine {
         Box::new(Coroutine {
             current_stack_segment: unsafe { Stack::dummy_stack() },
             saved_context: Context::empty(),
-            parent_context: Context::empty(),
+            parent: ptr::null_mut(),
         })
-    }
-
-    pub fn spawn<F>(f: F, opts: Options, stack_pool: &mut StackPool) -> Box<Coroutine>
-            where F: FnOnce(&mut Coroutine) + Send + 'static {
-        let stack = stack_pool.take_stack(opts.stack_size);
-
-        let mut coro = Box::new(Coroutine {
-            current_stack_segment: stack,
-            saved_context: Context::empty(),
-            parent_context: Context::empty(),
-        });
-
-        let ctx = Context::new(coroutine_initialize,
-                               unsafe { transmute(coro.deref()) },
-                               f,
-                               &mut coro.current_stack_segment);
-        coro.saved_context = ctx;
-        coro.resume();
-        coro
-    }
-
-    pub fn resume(&mut self) {
-        Context::swap(&mut self.parent_context, &self.saved_context);
-    }
-
-    pub fn yield_now(&mut self) {
-        Context::swap(&mut self.saved_context, &self.parent_context);
     }
 
     /// Destroy coroutine and try to reuse std::stack segment.
@@ -109,48 +86,142 @@ impl Coroutine {
     }
 }
 
+/// Coroutine managing environment
+#[allow(raw_pointer_derive)]
+#[derive(Debug)]
+pub struct Environment {
+    stack_pool: StackPool,
+    current_running: *mut Coroutine,
+    main_coroutine: Box<Coroutine>,
+}
+
+impl Environment {
+    /// Initialize a new environment
+    pub fn new() -> Box<Environment> {
+        let mut env = box Environment {
+            stack_pool: StackPool::new(),
+            current_running: ptr::null_mut(),
+            main_coroutine: Coroutine::empty(),
+        };
+
+        env.current_running = unsafe { transmute(env.main_coroutine.deref()) };
+        env
+    }
+
+    /// Spawn a new coroutine with options
+    pub fn spawn_opts<F>(&mut self, f: F, opts: Options) -> Box<Coroutine>
+            where F: FnOnce(&mut Environment) + Send + 'static {
+
+        let mut coro = box Coroutine {
+            current_stack_segment: self.stack_pool.take_stack(opts.stack_size),
+            saved_context: Context::empty(),
+            parent: ptr::null_mut(),
+        };
+
+        let ptr_self = unsafe { transmute(self) };
+        let ctx = Context::new(coroutine_initialize,
+                               ptr_self,
+                               f,
+                               &mut coro.current_stack_segment);
+        coro.saved_context = ctx;
+
+        // FIXME: To make the compiler happy
+        let me: &mut Environment = unsafe { transmute(ptr_self) };
+        me.resume(&mut coro);
+        coro
+    }
+
+    /// Spawn a coroutine with default options
+    pub fn spawn<F>(&mut self, f: F) -> Box<Coroutine>
+            where F: FnOnce(&mut Environment) + Send + 'static {
+        self.spawn_opts(f, Default::default())
+    }
+
+    /// Yield the current running coroutine
+    pub fn yield_now(&mut self) {
+        let mut current_running: &mut Coroutine = unsafe { transmute(self.current_running) };
+        self.current_running = current_running.parent;
+        let parent: &mut Coroutine = unsafe { transmute(self.current_running) };
+        Context::swap(&mut current_running.saved_context, &parent.saved_context);
+    }
+
+    /// Suspend the current coroutine and resume the `coro` now
+    pub fn resume(&mut self, coro: &mut Box<Coroutine>) {
+        coro.parent = self.current_running;
+        self.current_running = unsafe { transmute(coro.deref_mut()) };
+
+        let coro: &mut Coroutine = unsafe { transmute(self.current_running) };
+        let mut parent: &mut Coroutine = unsafe { transmute(coro.parent) };
+        Context::swap(&mut parent.saved_context, &coro.saved_context);
+    }
+
+    /// Destroy the coroutine
+    pub fn recycle(&mut self, coro: Box<Coroutine>) {
+        coro.recycle(&mut self.stack_pool)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::sync::mpsc::channel;
-    use std::default::Default;
 
-    use coroutine::Coroutine;
-    use stack::StackPool;
+    use coroutine::Environment;
 
     #[test]
     fn test_coroutine_basic() {
-        let mut stack_pool = StackPool::new();
+        let mut env = Environment::new();
 
         let (tx, rx) = channel();
-        let coro = Coroutine::spawn(move|_| {
+        let coro = env.spawn(move|_| {
             tx.send(1).unwrap();
-        }, Default::default(), &mut stack_pool);
+        });
 
-        coro.recycle(&mut stack_pool);
         assert_eq!(rx.recv().unwrap(), 1);
+
+        env.recycle(coro);
     }
 
     #[test]
     fn test_coroutine_yield() {
-        let mut stack_pool = StackPool::new();
+        let mut env = Environment::new();
 
         let (tx, rx) = channel();
-        let mut coro = Coroutine::spawn(move|coro| {
+        let mut coro = env.spawn(move|env| {
             tx.send(1).unwrap();
 
-            coro.yield_now();
+            env.yield_now();
 
             tx.send(2).unwrap();
-
-        }, Default::default(), &mut stack_pool);
+        });
 
         assert_eq!(rx.recv().unwrap(), 1);
         assert!(rx.try_recv().is_err());
 
-        coro.resume();
+        env.resume(&mut coro);
 
         assert_eq!(rx.recv().unwrap(), 2);
 
-        coro.recycle(&mut stack_pool);
+        env.recycle(coro);
+    }
+
+    #[test]
+    fn test_coroutine_spawn_inside() {
+        let mut env = Environment::new();
+
+        let (tx, rx) = channel();
+        let coro = env.spawn(move|env| {
+            tx.send(1).unwrap();
+
+            let subcoro = env.spawn(move|_| {
+                tx.send(2).unwrap();
+            });
+
+            env.recycle(subcoro);
+        });
+
+        assert_eq!(rx.recv().unwrap(), 1);
+        assert_eq!(rx.recv().unwrap(), 2);
+
+        env.recycle(coro);
     }
 }
