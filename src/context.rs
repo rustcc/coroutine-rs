@@ -52,14 +52,15 @@ impl Context {
     /// FIXME: this is basically an awful the interface. The main reason for
     ///        this is to reduce the number of allocations made when a green
     ///        task is spawned as much as possible
-    pub fn new<F: FnOnce() + Send>(init: InitFn, arg: usize, start: F, stack: &mut Stack) -> Context {
+    pub fn new<F, A>(init: InitFn, arg: usize, start: F, stack: &mut Stack) -> Context
+            where F: FnOnce(A) + Send + 'static {
         let sp: *const usize = stack.end();
         let sp: *mut usize = sp as *mut usize;
         // Save and then immediately load the current context,
         // which we will then modify to call the given function when restored
         let mut regs = box Registers::new();
 
-        initialize_call_frame(&mut regs, init, arg, unsafe { transmute(Box::new(Thunk::new(start))) }, sp);
+        initialize_call_frame(&mut regs, init, arg, unsafe { transmute(Box::new(Thunk::with_arg(start))) }, sp);
 
         // Scheduler tasks don't have a stack in the "we allocated it" sense,
         // but rather they run on pthreads stacks. We have complete control over
@@ -370,7 +371,7 @@ mod test {
     fn test_swap_context() {
 
         extern fn init_fn(arg: usize, f: *mut ()) -> ! {
-            let func: Box<Thunk> = unsafe { transmute(f) };
+            let func: Box<Thunk<(), _>> = unsafe { transmute(f) };
             if let Err(cause) = unsafe { try(move|| func.invoke(())) } {
                 error!("Panicked inside: {:?}", cause.downcast::<&str>());
             }
@@ -387,7 +388,7 @@ mod test {
         let (tx, rx) = channel();
 
         let mut stk = Stack::new(min_stack());
-        let ctx = Context::new(init_fn, unsafe { transmute(&cur) }, move|| {
+        let ctx = Context::new(init_fn, unsafe { transmute(&cur) }, move|_: ()| {
             tx.send(1).unwrap();
         }, &mut stk);
 
