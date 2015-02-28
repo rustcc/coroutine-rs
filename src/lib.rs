@@ -238,7 +238,7 @@ extern crate libc;
 
 // pub mod basic;
 pub mod context;
-// // pub mod coroutine;
+pub mod coroutine;
 // pub mod sched;
 // pub mod sleeper_list;
 pub mod stack;

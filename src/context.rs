@@ -25,6 +25,7 @@ use sys;
 // FIXME #7761: It would be nice to define regs as `Box<Option<Registers>>`
 // since the registers are sometimes empty, but the discriminant would
 // then misalign the regs again.
+#[derive(Debug)]
 pub struct Context {
     /// Hold the registers while the task or scheduler is suspended
     regs: Box<Registers>,
@@ -145,6 +146,7 @@ extern {
 
 #[cfg(target_arch = "x86")]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers {
     eax: u32, ebx: u32, ecx: u32, edx: u32,
     ebp: u32, esi: u32, edi: u32, esp: u32,
@@ -195,6 +197,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
 // register context must be larger.
 #[cfg(all(windows, target_arch = "x86_64"))]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers {
     gpr: [libc::uintptr_t; 14],
     _xmm: [simd::u32x4; 10]
@@ -212,6 +215,7 @@ impl Registers {
 
 #[cfg(all(not(windows), target_arch = "x86_64"))]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers {
     gpr: [libc::uintptr_t; 10],
     _xmm: [simd::u32x4; 6]
@@ -271,6 +275,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
 
 #[cfg(target_arch = "arm")]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers([libc::uintptr_t; 32]);
 
 #[cfg(target_arch = "arm")]
@@ -306,6 +311,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
 #[cfg(any(target_arch = "mips",
           target_arch = "mipsel"))]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers([libc::uintptr_t; 32]);
 
 #[cfg(any(target_arch = "mips",

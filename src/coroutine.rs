@@ -15,24 +15,22 @@ use context::Context;
 use stack::{StackPool, Stack};
 
 /// A coroutine is nothing more than a (register context, stack) pair.
+#[derive(Debug)]
 pub struct Coroutine {
     /// The segment of stack on which the task is currently running or
     /// if the task is blocked, on which the task will resume
     /// execution.
-    ///
-    /// Servo needs this to be public in order to tell SpiderMonkey
-    /// about the stack bounds.
-    pub current_stack_segment: Stack,
+    current_stack_segment: Stack,
 
     /// Always valid if the task is alive and not running.
-    pub saved_context: Context
+    saved_context: Context,
 }
 
 impl Coroutine {
     pub fn empty() -> Coroutine {
         Coroutine {
             current_stack_segment: unsafe { Stack::dummy_stack() },
-            saved_context: Context::empty()
+            saved_context: Context::empty(),
         }
     }
 

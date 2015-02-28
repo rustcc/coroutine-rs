@@ -12,6 +12,7 @@ use std::ptr;
 use std::sync::atomic;
 use std::os::{errno, MemoryMap, MapOption};
 use std::env::{self, page_size};
+use std::fmt;
 
 use libc;
 
@@ -19,6 +20,17 @@ use libc;
 pub struct Stack {
     buf: Option<MemoryMap>,
     min_size: usize,
+}
+
+impl fmt::Debug for Stack {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        try!(write!(f, "Stack {} buf: ", "{"));
+        match self.buf {
+            Some(ref map) => try!(write!(f, "Some({:#x}), ", map.data() as libc::uintptr_t)),
+            None => try!(write!(f, "None, ")),
+        }
+        write!(f, "min_size: {:?} {}", self.min_size, "}")
+    }
 }
 
 // Try to use MAP_STACK on platforms that support it (it's what we're doing
@@ -120,6 +132,7 @@ fn protect_last_page(stack: &MemoryMap) -> bool {
     }
 }
 
+#[derive(Debug)]
 pub struct StackPool {
     // Ideally this would be some data structure that preserved ordering on
     // Stack.min_size.
