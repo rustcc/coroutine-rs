@@ -165,6 +165,8 @@ impl Environment {
 mod test {
     use std::sync::mpsc::channel;
 
+    use test::Bencher;
+
     use coroutine::Environment;
 
     #[test]
@@ -251,5 +253,58 @@ mod test {
         });
 
         unreachable!();
+    }
+
+    #[test]
+    fn test_coroutine_resume_after_finished() {
+        let mut env = Environment::new();
+
+        let mut coro = env.spawn(move|_| {});
+
+        // It is already finished, but we try to resume it
+        // Idealy it would come back immediately
+        env.resume(&mut coro);
+
+        // Again?
+        env.resume(&mut coro);
+    }
+
+    #[bench]
+    fn bench_coroutine_spawning_without_recycle(b: &mut Bencher) {
+        b.iter(|| {
+            Environment::new().spawn(move|_| {});
+        });
+    }
+
+    #[bench]
+    fn bench_coroutine_spawning_with_recycle(b: &mut Bencher) {
+        let mut env = Environment::new();
+        b.iter(|| {
+            let coro = env.spawn(move|_| {});
+            env.recycle(coro);
+        });
+    }
+
+    #[bench]
+    fn bench_coroutine_counting(b: &mut Bencher) {
+        b.iter(|| {
+            let mut env = Environment::new();
+
+            const MAX_NUMBER: usize = 100;
+            let (tx, rx) = channel();
+
+            let mut coro = env.spawn(move|env| {
+                for _ in 0..MAX_NUMBER {
+                    tx.send(1).unwrap();
+                    env.yield_now();
+                }
+            });
+
+            let result = rx.iter().fold(0, |a, b| {
+                env.resume(&mut coro);
+                a + b
+            });
+            assert_eq!(result, MAX_NUMBER);
+        });
     }
 }
