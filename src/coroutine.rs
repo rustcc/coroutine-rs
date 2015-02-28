@@ -224,4 +224,32 @@ mod test {
 
         env.recycle(coro);
     }
+
+    #[test]
+    #[should_fail]
+    fn test_coroutine_panic() {
+        let mut env = Environment::new();
+
+        env.spawn(move|_| {
+            panic!("Panic inside a coroutine!!");
+        });
+
+        unreachable!();
+    }
+
+    #[test]
+    #[should_fail]
+    fn test_coroutine_child_panic() {
+        let mut env = Environment::new();
+
+        env.spawn(move|env| {
+
+            env.spawn(move|_| {
+                panic!("Panic inside a coroutine's child!!");
+            });
+
+        });
+
+        unreachable!();
+    }
 }
