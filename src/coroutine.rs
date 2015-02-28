@@ -40,3 +40,30 @@ impl Coroutine {
         stack_pool.give_stack(current_stack_segment);
     }
 }
+
+#[cfg(test)]
+mod test {
+
+    #[test]
+    fn test_coroutine_basic() {
+
+        extern fn init_fn(arg: usize, f: *mut ()) -> ! {
+            let func: Box<Thunk> = unsafe { transmute(f) };
+            if let Err(cause) = unsafe { try(move|| func.invoke(())) } {
+                error!("Panicked inside: {:?}", cause.downcast::<&str>());
+            }
+
+            let ctx: &Context = unsafe { transmute(arg) };
+
+            let mut dummy = Context::empty();
+            Context::swap(&mut dummy, ctx);
+
+            unreachable!();
+        }
+
+        let mut pool = StackPool::new();
+
+        let mut coro = Coroutine::empty();
+        coro.current_stack_segment = pool.take_stack();
+    }
+}
