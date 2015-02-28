@@ -367,23 +367,22 @@ mod test {
     use stack::Stack;
     use context::Context;
 
-    #[test]
-    fn test_swap_context() {
-
-        extern fn init_fn(arg: usize, f: *mut ()) -> ! {
-            let func: Box<Thunk<(), _>> = unsafe { transmute(f) };
-            if let Err(cause) = unsafe { try(move|| func.invoke(())) } {
-                error!("Panicked inside: {:?}", cause.downcast::<&str>());
-            }
-
-            let ctx: &Context = unsafe { transmute(arg) };
-
-            let mut dummy = Context::empty();
-            Context::swap(&mut dummy, ctx);
-
-            unreachable!();
+    extern "C" fn init_fn(arg: usize, f: *mut ()) -> ! {
+        let func: Box<Thunk<(), _>> = unsafe { transmute(f) };
+        if let Err(cause) = unsafe { try(move|| func.invoke(())) } {
+            error!("Panicked inside: {:?}", cause.downcast::<&str>());
         }
 
+        let ctx: &Context = unsafe { transmute(arg) };
+
+        let mut dummy = Context::empty();
+        Context::swap(&mut dummy, ctx);
+
+        unreachable!();
+    }
+
+    #[test]
+    fn test_swap_context() {
         let mut cur = Context::empty();
         let (tx, rx) = channel();
 

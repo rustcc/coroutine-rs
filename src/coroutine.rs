@@ -17,6 +17,7 @@ use std::thunk::Thunk;
 use std::mem::transmute;
 use std::rt::unwind::try;
 use std::boxed::BoxAny;
+use std::ops::Deref;
 
 use context::Context;
 use stack::{StackPool, Stack};
@@ -49,10 +50,8 @@ impl Default for Options {
 }
 
 extern "C" fn coroutine_initialize(arg: usize, f: *mut ()) -> ! {
-    let func: Box<Thunk<&mut Box<Coroutine>, _>> = unsafe { transmute(f) };
-    let coro: &mut Box<Coroutine> = unsafe { transmute(arg) };
-
-    error!("Before invoke {:?}", coro);
+    let func: Box<Thunk<&mut Coroutine, _>> = unsafe { transmute(f) };
+    let coro: &mut Coroutine = unsafe { transmute(arg) };
 
     let coro_mov = unsafe { transmute(arg) };
 
@@ -61,7 +60,6 @@ extern "C" fn coroutine_initialize(arg: usize, f: *mut ()) -> ! {
     }
 
     loop {
-        error!("After invoke {:?}", coro);
         coro.yield_now();
     }
 
@@ -78,7 +76,7 @@ impl Coroutine {
     }
 
     pub fn spawn<F>(f: F, opts: Options, stack_pool: &mut StackPool) -> Box<Coroutine>
-            where F: FnOnce(&mut Box<Coroutine>) + Send + 'static {
+            where F: FnOnce(&mut Coroutine) + Send + 'static {
         let stack = stack_pool.take_stack(opts.stack_size);
 
         let mut coro = Box::new(Coroutine {
@@ -88,7 +86,7 @@ impl Coroutine {
         });
 
         let ctx = Context::new(coroutine_initialize,
-                               unsafe { transmute(&coro) },
+                               unsafe { transmute(coro.deref()) },
                                f,
                                &mut coro.current_stack_segment);
         coro.saved_context = ctx;
@@ -115,7 +113,6 @@ impl Coroutine {
 mod test {
     use std::sync::mpsc::channel;
     use std::default::Default;
-    use std::mem::transmute_copy;
 
     use coroutine::Coroutine;
     use stack::StackPool;
@@ -141,26 +138,14 @@ mod test {
         let mut coro = Coroutine::spawn(move|coro| {
             tx.send(1).unwrap();
 
-            let addr: usize = unsafe { transmute_copy(coro) };
-            error!("Before {:#x}", addr);
-            let addr: usize = unsafe { transmute_copy(coro) };
-            error!("Before {:#x}", addr);
-
-            error!("Before yield {:?}", coro);
             coro.yield_now();
-            let addr: usize = unsafe { transmute_copy(coro) };
-            error!("After {:#x}", addr);
-            error!("After yield {:?}", coro);
 
             tx.send(2).unwrap();
 
-            error!("Sended {:?}\n", coro);
         }, Default::default(), &mut stack_pool);
 
         assert_eq!(rx.recv().unwrap(), 1);
         assert!(rx.try_recv().is_err());
-
-        error!("Before second resume {:?}", coro);
 
         coro.resume();
 
