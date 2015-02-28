@@ -25,6 +25,7 @@ use sys;
 // FIXME #7761: It would be nice to define regs as `Box<Option<Registers>>`
 // since the registers are sometimes empty, but the discriminant would
 // then misalign the regs again.
+#[derive(Debug)]
 pub struct Context {
     /// Hold the registers while the task or scheduler is suspended
     regs: Box<Registers>,
@@ -51,14 +52,15 @@ impl Context {
     /// FIXME: this is basically an awful the interface. The main reason for
     ///        this is to reduce the number of allocations made when a green
     ///        task is spawned as much as possible
-    pub fn new<F: FnOnce() + Send>(init: InitFn, arg: usize, start: F, stack: &mut Stack) -> Context {
+    pub fn new<F, A>(init: InitFn, arg: usize, start: F, stack: &mut Stack) -> Context
+            where F: FnOnce(A) + Send + 'static {
         let sp: *const usize = stack.end();
         let sp: *mut usize = sp as *mut usize;
         // Save and then immediately load the current context,
         // which we will then modify to call the given function when restored
         let mut regs = box Registers::new();
 
-        initialize_call_frame(&mut regs, init, arg, unsafe { transmute(Box::new(Thunk::new(start))) }, sp);
+        initialize_call_frame(&mut regs, init, arg, unsafe { transmute(Box::new(Thunk::with_arg(start))) }, sp);
 
         // Scheduler tasks don't have a stack in the "we allocated it" sense,
         // but rather they run on pthreads stacks. We have complete control over
@@ -145,6 +147,7 @@ extern {
 
 #[cfg(target_arch = "x86")]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers {
     eax: u32, ebx: u32, ecx: u32, edx: u32,
     ebp: u32, esi: u32, edi: u32, esp: u32,
@@ -195,6 +198,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
 // register context must be larger.
 #[cfg(all(windows, target_arch = "x86_64"))]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers {
     gpr: [libc::uintptr_t; 14],
     _xmm: [simd::u32x4; 10]
@@ -212,6 +216,7 @@ impl Registers {
 
 #[cfg(all(not(windows), target_arch = "x86_64"))]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers {
     gpr: [libc::uintptr_t; 10],
     _xmm: [simd::u32x4; 6]
@@ -271,6 +276,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
 
 #[cfg(target_arch = "arm")]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers([libc::uintptr_t; 32]);
 
 #[cfg(target_arch = "arm")]
@@ -306,6 +312,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
 #[cfg(any(target_arch = "mips",
           target_arch = "mipsel"))]
 #[repr(C)]
+#[derive(Debug)]
 struct Registers([libc::uintptr_t; 32]);
 
 #[cfg(any(target_arch = "mips",
@@ -360,28 +367,27 @@ mod test {
     use stack::Stack;
     use context::Context;
 
-    #[test]
-    fn test_swap_context() {
-
-        extern fn init_fn(arg: usize, f: *mut ()) -> ! {
-            let func: Box<Thunk> = unsafe { transmute(f) };
-            if let Err(cause) = unsafe { try(move|| func.invoke(())) } {
-                error!("Panicked inside: {:?}", cause.downcast::<&str>());
-            }
-
-            let ctx: &Context = unsafe { transmute(arg) };
-
-            let mut dummy = Context::empty();
-            Context::swap(&mut dummy, ctx);
-
-            unreachable!();
+    extern "C" fn init_fn(arg: usize, f: *mut ()) -> ! {
+        let func: Box<Thunk<(), _>> = unsafe { transmute(f) };
+        if let Err(cause) = unsafe { try(move|| func.invoke(())) } {
+            error!("Panicked inside: {:?}", cause.downcast::<&str>());
         }
 
+        let ctx: &Context = unsafe { transmute(arg) };
+
+        let mut dummy = Context::empty();
+        Context::swap(&mut dummy, ctx);
+
+        unreachable!();
+    }
+
+    #[test]
+    fn test_swap_context() {
         let mut cur = Context::empty();
         let (tx, rx) = channel();
 
         let mut stk = Stack::new(min_stack());
-        let ctx = Context::new(init_fn, unsafe { transmute(&cur) }, move|| {
+        let ctx = Context::new(init_fn, unsafe { transmute(&cur) }, move|_: ()| {
             tx.send(1).unwrap();
         }, &mut stk);
 
