@@ -14,7 +14,7 @@
 use std::default::Default;
 use std::rt::util::min_stack;
 use std::thunk::Thunk;
-use std::mem::transmute;
+use std::mem::{transmute, transmute_copy};
 use std::rt::unwind::try;
 use std::boxed::BoxAny;
 use std::ops::{Deref, DerefMut};
@@ -118,16 +118,13 @@ impl Environment {
             parent: ptr::null_mut(),
         };
 
-        let ptr_self = unsafe { transmute(self) };
         let ctx = Context::new(coroutine_initialize,
-                               ptr_self,
+                               unsafe { transmute_copy(&self) },
                                f,
                                &mut coro.current_stack_segment);
         coro.saved_context = ctx;
 
-        // FIXME: To make the compiler happy
-        let me: &mut Environment = unsafe { transmute(ptr_self) };
-        me.resume(&mut coro);
+        self.resume(&mut coro);
         coro
     }
 
@@ -148,9 +145,8 @@ impl Environment {
     /// Suspend the current coroutine and resume the `coro` now
     pub fn resume(&mut self, coro: &mut Box<Coroutine>) {
         coro.parent = self.current_running;
-        self.current_running = unsafe { transmute(coro.deref_mut()) };
+        self.current_running = unsafe { transmute_copy(&coro.deref_mut()) };
 
-        let coro: &mut Coroutine = unsafe { transmute(self.current_running) };
         let mut parent: &mut Coroutine = unsafe { transmute(coro.parent) };
         Context::swap(&mut parent.saved_context, &coro.saved_context);
     }
