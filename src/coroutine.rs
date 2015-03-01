@@ -176,6 +176,14 @@ impl Coroutine {
         });
     }
 
+    pub fn current() -> Rc<RefCell<Coroutine>> {
+        let opt = RefCell::new(None);
+        COROUTINE_ENVIRONMENT.with(|env| {
+            *opt.borrow_mut() = Some(env.borrow().current_running.clone());
+        });
+        opt.into_inner().unwrap()
+    }
+
     pub fn state(&self) -> State {
         self.state
     }
