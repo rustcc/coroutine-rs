@@ -5,7 +5,7 @@ extern crate coroutine;
 use std::thread;
 use std::rt::util::default_sched_threads;
 
-use coroutine::coroutine::{Coroutine, State};
+use coroutine::coroutine::Coroutine;
 
 fn main() {
 
@@ -15,23 +15,13 @@ fn main() {
         let t = thread::scoped(move|| {
             Coroutine::spawn(move|| {
                 let thread_id = i;
-
-                let coro = Coroutine::spawn(move|| {
+                Coroutine::spawn(move|| {
                     for count in 0..10 {
                         println!("Coroutine running in thread {}: counting {}", thread_id, count);
                         Coroutine::sched();
                     }
-                });
-
-                coro.resume().unwrap();
-
-                loop {
-                    match coro.state() {
-                        State::Suspended => coro.resume().unwrap(),
-                        _ => break,
-                    }
-                }
-            }).resume().unwrap();
+                }).join().unwrap();
+            }).join().unwrap();
         });
         threads.push(t);
     }
