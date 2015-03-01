@@ -17,8 +17,7 @@ use std::thunk::Thunk;
 use std::mem::transmute;
 use std::rt::unwind::try;
 use std::boxed::BoxAny;
-use std::ops::Deref;
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 use std::rc::Rc;
 
 use context::Context;
@@ -33,7 +32,6 @@ pub enum State {
 
 /// A coroutine is nothing more than a (register context, stack) pair.
 #[allow(raw_pointer_derive)]
-#[derive(Debug)]
 pub struct Coroutine {
     /// The segment of stack on which the task is currently running or
     /// if the task is blocked, on which the task will resume
@@ -44,7 +42,7 @@ pub struct Coroutine {
     saved_context: Context,
 
     /// Parent coroutine, may always be valid.
-    parent: Option<Rc<RefCell<Coroutine>>>,
+    parent: Option<Rc<UnsafeCell<Coroutine>>>,
 
     /// State
     state: State
@@ -56,7 +54,8 @@ impl Drop for Coroutine {
         match self.current_stack_segment.take() {
             Some(stack) => {
                 COROUTINE_ENVIRONMENT.with(|env| {
-                    env.borrow_mut().stack_pool.give_stack(stack);
+                    let env: &mut Environment = unsafe { transmute(env.get()) };
+                    env.stack_pool.give_stack(stack);
                 });
             },
             None => {}
@@ -87,8 +86,9 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
     }
 
     COROUTINE_ENVIRONMENT.with(|env| {
-        let mut env = env.borrow_mut();
-        env.current_running.borrow_mut().state = State::Finished;
+        let env: &mut Environment = unsafe { transmute(env.get()) };
+        let cur: &mut Coroutine = unsafe { transmute(env.current_running.get()) };
+        cur.state = State::Finished;
     });
 
     loop {
@@ -97,8 +97,8 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
 }
 
 impl Coroutine {
-    pub fn empty() -> Rc<RefCell<Coroutine>> {
-        Rc::new(RefCell::new(Coroutine {
+    pub fn empty() -> Rc<UnsafeCell<Coroutine>> {
+        Rc::new(UnsafeCell::new(Coroutine {
             current_stack_segment: None,
             saved_context: Context::empty(),
             parent: None,
@@ -106,47 +106,57 @@ impl Coroutine {
         }))
     }
 
-    pub fn spawn_opts<F>(f: F, opts: Options) -> Rc<RefCell<Coroutine>>
+    pub fn spawn_opts<F>(f: F, opts: Options) -> Rc<UnsafeCell<Coroutine>>
             where F: FnOnce() + Send + 'static {
-        let stack = RefCell::new(unsafe { Stack::dummy_stack() });
-        COROUTINE_ENVIRONMENT.with(|env| {
-            *stack.borrow_mut() = env.borrow_mut().stack_pool.take_stack(opts.stack_size);
-        });
+        let mut stack = unsafe {
+            let stack = UnsafeCell::new(Stack::dummy_stack());
+            COROUTINE_ENVIRONMENT.with(|env| {
+                let env: &mut Environment = transmute(env.get());
+                let stack: &mut Stack = transmute(stack.get());
 
-        let mut stack = stack.into_inner();
+                *stack = env.stack_pool.take_stack(opts.stack_size);
+            });
+
+            stack.into_inner()
+        };
         let coro = Coroutine::empty();
 
         let ctx = Context::new(coroutine_initialize,
                                0,
                                f,
                                &mut stack);
-        coro.borrow_mut().saved_context = ctx;
-        coro.borrow_mut().current_stack_segment = Some(stack);
+        unsafe {
+            let coro: &mut Coroutine = transmute(coro.get());
+            coro.saved_context = ctx;
+            coro.current_stack_segment = Some(stack);
+        }
 
         Coroutine::resume(&coro);
         coro
     }
 
     /// Spawn a coroutine with default options
-    pub fn spawn<F>(f: F) -> Rc<RefCell<Coroutine>>
+    pub fn spawn<F>(f: F) -> Rc<UnsafeCell<Coroutine>>
             where F: FnOnce() + Send + 'static {
         Coroutine::spawn_opts(f, Default::default())
     }
 
-    pub fn resume(coro: &Rc<RefCell<Coroutine>>) {
-        match coro.borrow().state {
+    pub fn resume(coro: &Rc<UnsafeCell<Coroutine>>) {
+        let to_coro: &mut Coroutine = unsafe { transmute(coro.get()) };
+        match to_coro.state {
             State::Finished => return,
             _ => {}
         }
 
         COROUTINE_ENVIRONMENT.with(|env| {
-            let current_running = env.borrow().current_running.clone();
+            let env: &mut Environment = unsafe { transmute(env.get()) };
 
-            let to_coro: &mut Coroutine = unsafe { transmute(coro.borrow().deref()) };
-            let from_coro: &mut Coroutine = unsafe { transmute(current_running.borrow().deref()) };
+            let current_running = env.current_running.clone();
+
+            let from_coro: &mut Coroutine = unsafe { transmute(current_running.get()) };
 
             to_coro.parent = Some(current_running.clone());
-            env.borrow_mut().current_running = coro.clone();
+            env.current_running = coro.clone();
 
             from_coro.state = State::Suspended;
             to_coro.state = State::Running;
@@ -157,11 +167,13 @@ impl Coroutine {
 
     pub fn sched() {
         COROUTINE_ENVIRONMENT.with(|env| {
-            let from_coro: &mut Coroutine = unsafe { transmute(env.borrow().current_running.deref()) };
+            let env: &mut Environment = unsafe { transmute(env.get()) };
+
+            let from_coro: &mut Coroutine = unsafe { transmute(env.current_running.get()) };
             let to_coro: &mut Coroutine = match from_coro.parent {
                 Some(ref parent) => unsafe {
-                    env.borrow_mut().current_running = parent.clone();
-                    transmute(parent.borrow().deref())
+                    env.current_running = parent.clone();
+                    transmute(parent.get())
                 },
                 None => return,
             };
@@ -176,12 +188,17 @@ impl Coroutine {
         });
     }
 
-    pub fn current() -> Rc<RefCell<Coroutine>> {
-        let opt = RefCell::new(None);
-        COROUTINE_ENVIRONMENT.with(|env| {
-            *opt.borrow_mut() = Some(env.borrow().current_running.clone());
-        });
-        opt.into_inner().unwrap()
+    pub fn current() -> Rc<UnsafeCell<Coroutine>> {
+        unsafe {
+            let opt = UnsafeCell::new(None);
+            COROUTINE_ENVIRONMENT.with(|env| {
+                let env: &mut Environment = transmute(env.get());
+                let opt: &mut Option<Rc<UnsafeCell<Coroutine>>> = transmute(opt.get());
+
+                *opt = Some(env.current_running.clone());
+            });
+            opt.into_inner().unwrap()
+        }
     }
 
     pub fn state(&self) -> State {
@@ -189,14 +206,13 @@ impl Coroutine {
     }
 }
 
-thread_local!(static COROUTINE_ENVIRONMENT: RefCell<Environment> = RefCell::new(Environment::new()));
+thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Environment> = UnsafeCell::new(Environment::new()));
 
 /// Coroutine managing environment
 #[allow(raw_pointer_derive)]
-#[derive(Debug)]
 struct Environment {
     stack_pool: StackPool,
-    current_running: Rc<RefCell<Coroutine>>,
+    current_running: Rc<UnsafeCell<Coroutine>>,
 }
 
 impl Environment {
@@ -301,6 +317,22 @@ mod test {
     fn bench_coroutine_spawning_with_recycle(b: &mut Bencher) {
         b.iter(|| {
             Coroutine::spawn(move|| {});
+        });
+    }
+
+    #[bench]
+    fn bench_normal_counting(b: &mut Bencher) {
+        b.iter(|| {
+            const MAX_NUMBER: usize = 100;
+
+            let (tx, rx) = channel();
+
+            let mut result = 0;
+            for _ in 0..MAX_NUMBER {
+                tx.send(1).unwrap();
+                result += rx.recv().unwrap();
+            }
+            assert_eq!(result, MAX_NUMBER);
         });
     }
 

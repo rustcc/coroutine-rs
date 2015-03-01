@@ -211,6 +211,7 @@
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
 #![feature(box_syntax, std_misc, os, libc, env, asm, core, alloc, test, unboxed_closures)]
+#![feature(rustc_private)]
 
 #[macro_use] extern crate log;
 extern crate libc;
