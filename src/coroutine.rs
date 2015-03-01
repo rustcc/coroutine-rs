@@ -135,7 +135,6 @@ impl Coroutine {
     }
 
     pub fn spawn_opts<F>(f: F, opts: Options) -> Handle where F: FnOnce() + Send + 'static {
-        let mut coro = Coroutine::empty();
         COROUTINE_ENVIRONMENT.with(|env| unsafe {
             let env: &mut Environment = transmute(env.get());
             
@@ -145,18 +144,16 @@ impl Coroutine {
                                    0,
                                    f,
                                    &mut stack);
-
+            let mut coro = Coroutine::empty();
             coro.saved_context = ctx;
             coro.current_stack_segment = Some(stack);
             coro.state = State::Suspended;
-        });
-
-        coro.handle()
+            coro
+        }).handle()
     }
 
     /// Spawn a coroutine with default options
-    pub fn spawn<F>(f: F) -> Handle
-            where F: FnOnce() + Send + 'static {
+    pub fn spawn<F>(f: F) -> Handle where F: FnOnce() + Send + 'static {
         Coroutine::spawn_opts(f, Default::default())
     }
 
@@ -167,31 +164,30 @@ impl Coroutine {
             State::Panicked => panic!("Tried to resume a panicked coroutine"),
             _ => {}
         }
-
-        let mut result: Result<(), Box<Any + Send>> = Ok(());
         COROUTINE_ENVIRONMENT.with(|env| {
             let env: &mut Environment = unsafe { transmute(env.get()) };
-
+            
             let current_running = env.current_running.clone();
-
+            
             let from_coro: &mut Coroutine = unsafe { transmute(current_running.0.get()) };
-
+            
             to_coro.parent = Some(current_running.clone());
             env.current_running = coro.clone();
-
+            
             from_coro.state = State::Suspended;
             to_coro.state = State::Running;
-
+            
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
-
+            
             match env.running_state.take() {
                 Some(err) => {
-                    result = Err(err);
+                    Err(err)
                 },
-                None => {}
+                None => {
+                    Ok(())
+                }
             }
-        });
-        result
+        })
     }
 
     pub fn sched() {
@@ -218,16 +214,10 @@ impl Coroutine {
     }
 
     pub fn current() -> Handle {
-        unsafe {
-            let opt = UnsafeCell::new(None);
-            COROUTINE_ENVIRONMENT.with(|env| {
-                let env: &mut Environment = transmute(env.get());
-                let opt: &mut Option<Handle> = transmute(opt.get());
-
-                *opt = Some(env.current_running.clone());
-            });
-            opt.into_inner().unwrap()
-        }
+        COROUTINE_ENVIRONMENT.with(|env| unsafe {
+            let env: &mut Environment = transmute(env.get());
+            env.current_running.clone()
+        })
     }
 
     pub fn state(coro: &Handle) -> State {
