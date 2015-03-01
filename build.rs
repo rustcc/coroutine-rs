@@ -1,4 +1,4 @@
-#![feature(path, env)]
+#![feature(path)]
 extern crate gcc;
 
 use std::path::PathBuf;
