@@ -197,17 +197,14 @@ thread_local!(static COROUTINE_ENVIRONMENT: RefCell<Environment> = RefCell::new(
 struct Environment {
     stack_pool: StackPool,
     current_running: Rc<RefCell<Coroutine>>,
-    main_coroutine: Rc<RefCell<Coroutine>>,
 }
 
 impl Environment {
     /// Initialize a new environment
     fn new() -> Environment {
-        let main_coro = Coroutine::empty();
         Environment {
             stack_pool: StackPool::new(),
-            current_running: main_coro.clone(),
-            main_coroutine: main_coro,
+            current_running: Coroutine::empty(),
         }
     }
 }
