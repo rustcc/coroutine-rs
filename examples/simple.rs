@@ -16,15 +16,18 @@ fn main() {
         // Spawn a new coroutine
         Coroutine::spawn(move|| {
             println!("Hello inside");
-        });
+        }).resume().unwrap();
 
         println!("Good bye");
     });
 
+    // Run the coroutine
+    coro.resume().unwrap();
+
     println!("We are here!");
 
     // Resume the coroutine
-    Coroutine::resume(&coro);
+    coro.resume().unwrap();
 
     println!("Back to main.");
 }

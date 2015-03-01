@@ -3,10 +3,9 @@
 extern crate coroutine;
 
 use std::thread;
-use std::sync::mpsc::channel;
 use std::rt::util::default_sched_threads;
 
-use coroutine::coroutine::{Coroutine, Handle, State};
+use coroutine::coroutine::{Coroutine, State};
 
 fn main() {
 
@@ -24,13 +23,15 @@ fn main() {
                     }
                 });
 
+                coro.resume().unwrap();
+
                 loop {
                     match coro.state() {
-                        State::Suspended => coro.resume(),
+                        State::Suspended => coro.resume().unwrap(),
                         _ => break,
                     }
                 }
-            });
+            }).resume().unwrap();
         });
         threads.push(t);
     }

@@ -16,7 +16,7 @@ use std::rt::util::min_stack;
 use thunk::Thunk;
 use std::mem::transmute;
 use std::rt::unwind::try;
-use std::boxed::BoxAny;
+use std::any::Any;
 use std::cell::UnsafeCell;
 use std::rc::Rc;
 
@@ -28,7 +28,10 @@ pub enum State {
     Suspended,
     Running,
     Finished,
+    Panicked,
 }
+
+pub type ResumeResult<T> = Result<T, Box<Any + Send>>;
 
 /// Coroutine spawn options
 #[derive(Debug)]
@@ -49,7 +52,7 @@ impl Default for Options {
 pub struct Handle(Rc<UnsafeCell<Coroutine>>);
 
 impl Handle {
-    pub fn resume(&self) {
+    pub fn resume(&self) -> ResumeResult<()> {
         Coroutine::resume(&self)
     }
 
@@ -73,7 +76,7 @@ pub struct Coroutine {
     parent: Option<Handle>,
 
     /// State
-    state: State
+    state: State,
 }
 
 /// Destroy coroutine and try to reuse std::stack segment.
@@ -95,14 +98,22 @@ impl Drop for Coroutine {
 extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
     let func: Box<Thunk> = unsafe { transmute(f) };
 
-    if let Err(cause) = unsafe { try(move|| func.invoke(())) } {
-        error!("Panicked inside: {:?}", cause.downcast::<&str>());
-    }
+    let ret = unsafe { try(move|| func.invoke(())) };
 
-    COROUTINE_ENVIRONMENT.with(|env| {
+    COROUTINE_ENVIRONMENT.with(move|env| {
         let env: &mut Environment = unsafe { transmute(env.get()) };
         let cur: &mut Coroutine = unsafe { transmute(env.current_running.0.get()) };
-        cur.state = State::Finished;
+
+        match ret {
+            Ok(..) => {
+                env.running_state = None;
+                cur.state = State::Finished;
+            }
+            Err(err) => {
+                env.running_state = Some(err);
+                cur.state = State::Panicked;
+            }
+        }
     });
 
     loop {
@@ -144,7 +155,6 @@ impl Coroutine {
         });
 
         let coro = unsafe { coro.into_inner() };
-        Coroutine::resume(&coro);
         coro
     }
 
@@ -154,13 +164,15 @@ impl Coroutine {
         Coroutine::spawn_opts(f, Default::default())
     }
 
-    pub fn resume(coro: &Handle) {
+    pub fn resume(coro: &Handle) -> ResumeResult<()> {
         let to_coro: &mut Coroutine = unsafe { transmute(coro.0.get()) };
         match to_coro.state {
-            State::Finished | State::Running => return,
+            State::Finished | State::Running => return Ok(()),
+            State::Panicked => panic!("Tried to resume a panicked coroutine"),
             _ => {}
         }
 
+        let result = UnsafeCell::new(Ok(()));
         COROUTINE_ENVIRONMENT.with(|env| {
             let env: &mut Environment = unsafe { transmute(env.get()) };
 
@@ -175,7 +187,19 @@ impl Coroutine {
             to_coro.state = State::Running;
 
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
-        })
+
+            match env.running_state.take() {
+                Some(err) => {
+                    let result: &mut Result<(), Box<Any + Send>> = unsafe { transmute(result.get()) };
+                    *result = Err(err);
+                },
+                None => {}
+            }
+        });
+
+        unsafe {
+            result.into_inner()
+        }
     }
 
     pub fn sched() {
@@ -192,7 +216,7 @@ impl Coroutine {
             };
 
             match from_coro.state {
-                State::Finished => {},
+                State::Finished | State::Panicked => {},
                 _ => from_coro.state = State::Suspended,
             }
             to_coro.state = State::Running;
@@ -227,6 +251,8 @@ thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Environment> = UnsafeCell
 struct Environment {
     stack_pool: StackPool,
     current_running: Handle,
+
+    running_state: Option<Box<Any + Send>>,
 }
 
 impl Environment {
@@ -235,6 +261,8 @@ impl Environment {
         Environment {
             stack_pool: StackPool::new(),
             current_running: Coroutine::empty(),
+
+            running_state: None,
         }
     }
 }
@@ -250,9 +278,10 @@ mod test {
     #[test]
     fn test_coroutine_basic() {
         let (tx, rx) = channel();
-        Coroutine::spawn(move|| {
+        let coro = Coroutine::spawn(move|| {
             tx.send(1).unwrap();
         });
+        assert!(coro.resume().is_ok());
 
         assert_eq!(rx.recv().unwrap(), 1);
     }
@@ -268,10 +297,12 @@ mod test {
             tx.send(2).unwrap();
         });
 
+        assert!(coro.resume().is_ok());
+
         assert_eq!(rx.recv().unwrap(), 1);
         assert!(rx.try_recv().is_err());
 
-        Coroutine::resume(&coro);
+        assert!(coro.resume().is_ok());
 
         assert_eq!(rx.recv().unwrap(), 2);
     }
@@ -279,40 +310,42 @@ mod test {
     #[test]
     fn test_coroutine_spawn_inside() {
         let (tx, rx) = channel();
-        Coroutine::spawn(move|| {
+        let coro = Coroutine::spawn(move|| {
             tx.send(1).unwrap();
 
-            Coroutine::spawn(move|| {
+            let coro = Coroutine::spawn(move|| {
                 tx.send(2).unwrap();
             });
+
+            assert!(coro.resume().is_ok());
         });
+
+        assert!(coro.resume().is_ok());
 
         assert_eq!(rx.recv().unwrap(), 1);
         assert_eq!(rx.recv().unwrap(), 2);
     }
 
     #[test]
-    #[should_fail]
     fn test_coroutine_panic() {
-        Coroutine::spawn(move|| {
+        let coro = Coroutine::spawn(move|| {
             panic!("Panic inside a coroutine!!");
         });
-
-        unreachable!();
+        assert!(coro.resume().is_err());
     }
 
     #[test]
-    #[should_fail]
     fn test_coroutine_child_panic() {
-        Coroutine::spawn(move|| {
+        let coro = Coroutine::spawn(move|| {
 
-            Coroutine::spawn(move|| {
+            let coro = Coroutine::spawn(move|| {
                 panic!("Panic inside a coroutine's child!!");
             });
 
+            assert!(coro.resume().is_err());
         });
 
-        unreachable!();
+        assert!(coro.resume().is_ok());
     }
 
     #[test]
@@ -321,18 +354,20 @@ mod test {
 
         // It is already finished, but we try to resume it
         // Idealy it would come back immediately
-        Coroutine::resume(&coro);
+        assert!(Coroutine::resume(&coro).is_ok());
 
         // Again?
-        Coroutine::resume(&coro);
+        assert!(Coroutine::resume(&coro).is_ok());
     }
 
     #[test]
     fn test_coroutine_resume_itself() {
-        Coroutine::spawn(move|| {
+        let coro = Coroutine::spawn(move|| {
             // Resume itself
-            Coroutine::current().resume();
+            Coroutine::current().resume().unwrap();
         });
+
+        assert!(coro.resume().is_ok());
     }
 
     #[test]
@@ -343,7 +378,7 @@ mod test {
     #[bench]
     fn bench_coroutine_spawning_with_recycle(b: &mut Bencher) {
         b.iter(|| {
-            Coroutine::spawn(move|| {});
+            let _ = Coroutine::spawn(move|| {}).resume();
         });
     }
 
@@ -377,7 +412,7 @@ mod test {
             });
 
             let result = rx.iter().fold(0, |a, b| {
-                Coroutine::resume(&coro);
+                let _ = Coroutine::resume(&coro);
                 a + b
             });
             assert_eq!(result, MAX_NUMBER);
