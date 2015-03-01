@@ -327,6 +327,19 @@ mod test {
         Coroutine::resume(&coro);
     }
 
+    #[test]
+    fn test_coroutine_resume_itself() {
+        Coroutine::spawn(move|| {
+            // Resume itself
+            Coroutine::current().resume();
+        });
+    }
+
+    #[test]
+    fn test_coroutine_yield_in_main() {
+        Coroutine::sched();
+    }
+
     #[bench]
     fn bench_coroutine_spawning_with_recycle(b: &mut Bencher) {
         b.iter(|| {
