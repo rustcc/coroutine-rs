@@ -13,7 +13,7 @@
 
 use std::default::Default;
 use std::rt::util::min_stack;
-use std::thunk::Thunk;
+use thunk::Thunk;
 use std::mem::transmute;
 use std::rt::unwind::try;
 use std::boxed::BoxAny;
