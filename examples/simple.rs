@@ -4,7 +4,7 @@ use coroutine::coroutine::Coroutine;
 
 fn main() {
     // Spawn a new coroutine
-    let mut coro = Coroutine::spawn(move|| {
+    let coro = Coroutine::spawn(move|| {
 
         println!("Hello in coroutine!");
 
@@ -24,7 +24,7 @@ fn main() {
     println!("We are here!");
 
     // Resume the coroutine
-    coro.resume();
+    Coroutine::resume(&coro);
 
     println!("Back to main.");
 }

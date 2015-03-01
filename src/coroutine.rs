@@ -108,29 +108,28 @@ impl Coroutine {
 
     pub fn spawn_opts<F>(f: F, opts: Options) -> Rc<UnsafeCell<Coroutine>>
             where F: FnOnce() + Send + 'static {
-        let mut stack = unsafe {
-            let stack = UnsafeCell::new(Stack::dummy_stack());
-            COROUTINE_ENVIRONMENT.with(|env| {
+
+        let coro = UnsafeCell::new(Coroutine::empty());
+        COROUTINE_ENVIRONMENT.with(|env| {
+            unsafe {
                 let env: &mut Environment = transmute(env.get());
-                let stack: &mut Stack = transmute(stack.get());
 
-                *stack = env.stack_pool.take_stack(opts.stack_size);
-            });
+                let mut stack = env.stack_pool.take_stack(opts.stack_size);
 
-            stack.into_inner()
-        };
-        let coro = Coroutine::empty();
+                let ctx = Context::new(coroutine_initialize,
+                                   0,
+                                   f,
+                                   &mut stack);
 
-        let ctx = Context::new(coroutine_initialize,
-                               0,
-                               f,
-                               &mut stack);
-        unsafe {
-            let coro: &mut Coroutine = transmute(coro.get());
-            coro.saved_context = ctx;
-            coro.current_stack_segment = Some(stack);
-        }
+                let coro_cell: &mut Rc<UnsafeCell<Coroutine>> = transmute(coro.get());
+                let coro: &mut Coroutine = transmute(coro_cell.get());
+                coro.saved_context = ctx;
+                coro.current_stack_segment = Some(stack);
+                coro.state = State::Suspended;
+            }
+        });
 
+        let coro = unsafe { coro.into_inner() };
         Coroutine::resume(&coro);
         coro
     }
@@ -144,7 +143,7 @@ impl Coroutine {
     pub fn resume(coro: &Rc<UnsafeCell<Coroutine>>) {
         let to_coro: &mut Coroutine = unsafe { transmute(coro.get()) };
         match to_coro.state {
-            State::Finished => return,
+            State::Finished | State::Running => return,
             _ => {}
         }
 
