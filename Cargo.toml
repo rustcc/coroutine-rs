@@ -17,7 +17,3 @@ log = "*"
 [lib]
 name = "coroutine"
 path = "src/lib.rs"
-
-[[bin]]
-name = "simple"
-path = "examples/simple.rs"

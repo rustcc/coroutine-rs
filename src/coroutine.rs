@@ -411,6 +411,8 @@ mod test {
                 }
             });
 
+            let _ = coro.resume();
+
             let result = rx.iter().fold(0, |a, b| {
                 let _ = Coroutine::resume(&coro);
                 a + b
