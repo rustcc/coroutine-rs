@@ -13,7 +13,7 @@ use std::usize;
 use std::mem::transmute;
 #[cfg(target_arch = "x86_64")]
 use std::simd;
-use std::thunk::Thunk;
+use thunk::Thunk;
 
 use libc;
 
@@ -357,7 +357,7 @@ pub fn mut_offset<T>(ptr: *mut T, count: isize) -> *mut T {
 
 #[cfg(test)]
 mod test {
-    use std::thunk::Thunk;
+    use thunk::Thunk;
     use std::mem::transmute;
     use std::sync::mpsc::channel;
     use std::rt::util::min_stack;
