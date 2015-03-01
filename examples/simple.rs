@@ -1,32 +1,25 @@
 extern crate coroutine;
 
-use std::default::Default;
-
-use coroutine::coroutine::{Coroutine, Options};
+use coroutine::coroutine::{spawn, sched};
 
 fn main() {
     // Spawn a new coroutine
-    let mut opts = Options::default();
-    opts.name = Some("Outer".to_string());
-
-    let coro = Coroutine::spawn_opts(move|| {
+    let coro = spawn(move|| {
 
         println!("Hello in coroutine!");
 
         // Yield back to it's parent
-        Coroutine::sched();
+        sched();
 
         println!("We are back!!");
 
         // Spawn a new coroutine
-        let mut opts = Options::default();
-        opts.name = Some("Inner".to_string());
-        Coroutine::spawn_opts(move|| {
+        spawn(move|| {
             println!("Hello inside");
-        }, opts).join().unwrap();
+        }).join().unwrap();
 
         println!("Good bye");
-    }, opts).resume().unwrap();
+    }).resume().unwrap();
 
     println!("We are here!");
 

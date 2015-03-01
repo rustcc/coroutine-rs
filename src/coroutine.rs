@@ -112,6 +112,11 @@ impl Handle {
         }
         Ok(coro)
     }
+
+    #[inline]
+    pub fn name(&self) -> Option<&str> {
+        self.0.name.as_ref().map(|s| &**s)
+    }
 }
 
 /// A coroutine is nothing more than a (register context, stack) pair.
@@ -169,8 +174,26 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
                 env.current_running.as_mut().unwrap().0.state = State::Finished;
             }
             Err(err) => {
-                env.running_state = Some(err);
                 env.current_running.as_mut().unwrap().0.state = State::Panicked;
+
+                {
+                    let msg = match err.downcast_ref::<&'static str>() {
+                        Some(s) => *s,
+                        None => match err.downcast_ref::<String>() {
+                            Some(s) => &s[..],
+                            None => "Box<Any>",
+                        }
+                    }.to_string();
+                    current().with(move|cur| {
+                        {
+                            let name = cur.name().unwrap_or("<unnamed>");
+                            println!("Coroutine '{}' panicked at '{}'", name, msg);
+                        }
+                        cur
+                    });
+                }
+
+                env.running_state = Some(err);
             }
         }
     });
@@ -181,7 +204,7 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
 }
 
 impl Coroutine {
-    pub fn empty() -> Handle {
+    fn empty() -> Handle {
         Handle(box Coroutine {
             current_stack_segment: None,
             saved_context: Context::empty(),
@@ -191,7 +214,7 @@ impl Coroutine {
         })
     }
 
-    pub fn with_name(name: &str) -> Handle {
+    fn with_name(name: &str) -> Handle {
         Handle(box Coroutine {
             current_stack_segment: None,
             saved_context: Context::empty(),
@@ -251,9 +274,11 @@ impl Coroutine {
     }
 }
 
+/// HandleGuard. With provide a `with` method for accessing the current running Coroutine
 pub struct HandleGuard;
 
 impl HandleGuard {
+    /// Get the current running Coroutine. You have to return it back!
     pub fn with<F>(&self, f: F)
         where F: FnOnce(Handle) -> Handle + Send + 'static {
             
@@ -289,13 +314,60 @@ impl Environment {
     }
 }
 
+/// Coroutine configuration. Provides detailed control over the properties and behavior of new Coroutines.
+pub struct Builder {
+    opts: Options,
+}
+
+impl Builder {
+    /// Generate the base configuration for spawning a Coroutine, from which configuration methods can be chained.
+    pub fn new() -> Builder {
+        Builder {
+            opts: Default::default(),
+        }
+    }
+
+    /// Name the Coroutine-to-be. Currently the name is used for identification only in panic messages.
+    pub fn name(mut self, name: String) -> Builder {
+        self.opts.name = Some(name);
+        self
+    }
+
+    /// Set the size of the stack for the new Coroutine.
+    pub fn stack_size(mut self, size: usize) -> Builder {
+        self.opts.stack_size = size;
+        self
+    }
+
+    /// Spawn a new Coroutine, and return a handle for it.
+    pub fn spawn<F>(self, f: F) -> Handle
+            where F: FnOnce() + Send + 'static {
+        Coroutine::spawn_opts(f, self.opts)
+    }
+}
+
+/// Spawn a new Coroutine
+pub fn spawn<F>(f: F) -> Handle
+        where F: FnOnce() + Send + 'static {
+    Builder::new().spawn(f)
+}
+
+/// Get the current Coroutine
+pub fn current() -> HandleGuard {
+    Coroutine::current()
+}
+
+/// Yield the current Coroutine
+pub fn sched() {
+    Coroutine::sched()
+}
+
 #[cfg(test)]
 mod test {
     use std::sync::mpsc::channel;
 
-    use test::Bencher;
-
-    use coroutine::Coroutine;
+    use super::Coroutine;
+    use super::Builder;
 
     #[test]
     fn test_coroutine_basic() {
@@ -386,6 +458,24 @@ mod test {
     fn test_coroutine_yield_in_main() {
         Coroutine::sched();
     }
+
+    #[test]
+    fn test_builder_basic() {
+        let (tx, rx) = channel();
+        Builder::new().name("Test builder".to_string()).spawn(move|| {
+            tx.send(1).unwrap();
+        }).join().unwrap();
+        assert_eq!(rx.recv().unwrap(), 1);
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use std::sync::mpsc::channel;
+
+    use test::Bencher;
+
+    use super::Coroutine;
 
     #[bench]
     fn bench_coroutine_spawning_with_recycle(b: &mut Bencher) {

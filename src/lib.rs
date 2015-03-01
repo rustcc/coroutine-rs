@@ -219,6 +219,8 @@ extern crate libc;
 // extern crate native;
 extern crate test;
 
+pub use self::coroutine::Builder;
+
 // use std::mem::replace;
 // use std::os;
 // use std::rt::task::TaskOpts;
