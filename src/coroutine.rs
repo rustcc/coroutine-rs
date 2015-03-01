@@ -52,12 +52,28 @@ impl Default for Options {
 pub struct Handle(Rc<UnsafeCell<Coroutine>>);
 
 impl Handle {
+
+    /// Resume this Coroutine now
     pub fn resume(&self) -> ResumeResult<()> {
         Coroutine::resume(&self)
     }
 
+    /// The state of the Coroutine
     pub fn state(&self) -> State {
         Coroutine::state(&self)
+    }
+
+    /// Join the Coroutine
+    pub fn join(&self) -> ResumeResult<()> {
+        loop {
+            match self.state() {
+                State::Suspended => try!(self.resume()),
+                State::Finished => break,
+                _ => {}
+            }
+        }
+
+        Ok(())
     }
 }
 
