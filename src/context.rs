@@ -13,7 +13,7 @@ use std::usize;
 use std::mem::transmute;
 #[cfg(target_arch = "x86_64")]
 use std::simd;
-use std::thunk::Thunk;
+use thunk::Thunk;
 
 use libc;
 

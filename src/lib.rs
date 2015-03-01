@@ -244,6 +244,7 @@ pub mod coroutine;
 // pub mod sched;
 // pub mod sleeper_list;
 pub mod stack;
+mod thunk; // use self-maintained thunk, because std::thunk is temporary.
 // pub mod task;
 mod sys;
 
