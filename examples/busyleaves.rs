@@ -33,7 +33,7 @@ fn main() {
             loop {
                 match queue.pop() {
                     Some(mut coro) => {
-                        coro = coro.resume().unwrap();
+                        coro.resume().unwrap();
 
                         match coro.state() {
                             State::Suspended => {
