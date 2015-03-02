@@ -6,7 +6,7 @@ use std::thread;
 use std::rt::util::default_sched_threads;
 
 use coroutine::mpmc_bounded_queue::Queue;
-use coroutine::coroutine::{Coroutine, State};
+use coroutine::coroutine::{spawn, sched, State};
 
 fn main() {
     const MAX_MESSAGES_NUM: usize = 1000;
@@ -14,13 +14,13 @@ fn main() {
 
     let queue = Queue::with_capacity(n_threads * MAX_MESSAGES_NUM);
 
-    let coro = Coroutine::spawn(move || {
+    let coro = spawn(move || {
         let mut count = 0;
         loop {
             println!("Counting {} in {:?}", count, thread::current());
             count += 1;
 
-            Coroutine::sched();
+            sched();
         }
     });
 
