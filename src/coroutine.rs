@@ -256,35 +256,25 @@ impl Coroutine {
         });
     }
 
-    // pub fn current() -> Handle {
-    //     unsafe {
-    //         let opt = UnsafeCell::new(None);
-    //         COROUTINE_ENVIRONMENT.with(|env| {
-    //             let env: &mut Environment = transmute(env.get());
-    //             let opt: &mut Option<Handle> = transmute(opt.get());
-
-    //             *opt = Some(env.current_running.clone());
-    //         });
-    //         opt.into_inner().unwrap()
-    //     }
-    // }
+    pub fn current() -> HandleGuard {
+        HandleGuard
+    }
 
     pub fn state(&self) -> State {
         self.state
     }
+}
 
-    // /// Join the Coroutine
-    // pub fn join(self) -> ResumeResult<Handle> {
-    //     loop {
-    //         self = match self.state() {
-    //             State::Suspended => try!(self.resume()),
-    //             State::Finished => break,
-    //             _ => self,
-    //         }
-    //     }
+pub struct HandleGuard;
 
-    //     Ok(self)
-    // }
+impl HandleGuard {
+    pub fn with<F>(&self, f: F)
+            where F: FnOnce(Handle) -> Handle + Send + 'static {
+        COROUTINE_ENVIRONMENT.with(|env| {
+            let env: &mut Environment = unsafe { transmute(env.get()) };
+            env.current_running = Some(f(env.current_running.take().unwrap()));
+        });
+    }
 }
 
 thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Environment> = UnsafeCell::new(Environment::new()));
@@ -395,15 +385,17 @@ mod test {
         assert!(coro.resume().is_ok());
     }
 
-    // #[test]
-    // fn test_coroutine_resume_itself() {
-    //     let coro = Coroutine::spawn(move|| {
-    //         // Resume itself
-    //         Coroutine::current().resume().unwrap();
-    //     });
+    #[test]
+    fn test_coroutine_resume_itself() {
+        let coro = Coroutine::spawn(move|| {
+            // Resume itself
+            Coroutine::current().with(|me| {
+                me.resume().unwrap()
+            });
+        });
 
-    //     assert!(coro.resume().is_ok());
-    // }
+        assert!(coro.resume().is_ok());
+    }
 
     #[test]
     fn test_coroutine_yield_in_main() {
