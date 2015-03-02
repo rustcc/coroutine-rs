@@ -68,7 +68,6 @@ impl Handle {
             _ => {}
         }
 
-        let result = UnsafeCell::new(None);
         COROUTINE_ENVIRONMENT.with(|env| {
             let env: &mut Environment = unsafe { transmute(env.get()) };
 
@@ -90,19 +89,16 @@ impl Handle {
             // Move out here
             self = env.current_running.take().unwrap();
             env.current_running = Some(from_coro);
-
-            let result: &mut Option<_> = unsafe { transmute(result.get()) };
+            
             match env.running_state.take() {
                 Some(err) => {
-                    *result = Some(Err(err));
+                    Err(err)
                 },
                 None => {
-                    *result = Some(Ok(self))
+                    Ok(self)
                 }
             }
-        });
-
-        unsafe { result.into_inner().unwrap() }
+        })
     }
 
     #[inline]
@@ -228,36 +224,26 @@ impl Coroutine {
         })
     }
 
-    pub fn spawn_opts<F>(f: F, opts: Options) -> Handle
-            where F: FnOnce() + Send + 'static {
-
-        let coro = UnsafeCell::new(Coroutine::empty());
-        COROUTINE_ENVIRONMENT.with(|env| {
-            unsafe {
-                let env: &mut Environment = transmute(env.get());
-
-                let mut stack = env.stack_pool.take_stack(opts.stack_size);
-
-                let ctx = Context::new(coroutine_initialize,
+    pub fn spawn_opts<F>(f: F, opts: Options) -> Handle where F: FnOnce() + Send + 'static {
+        COROUTINE_ENVIRONMENT.with(move|env| unsafe {
+            let env: &mut Environment = transmute(env.get());
+            let mut stack = env.stack_pool.take_stack(opts.stack_size);
+            let ctx = Context::new(coroutine_initialize,
                                    0,
                                    f,
                                    &mut stack);
 
-                let coro: &mut Handle = transmute(coro.get());
-                coro.0.saved_context = ctx;
-                coro.0.current_stack_segment = Some(stack);
-                coro.0.state = State::Suspended;
-            }
-        });
-
-        let mut coro = unsafe { coro.into_inner() };
-        coro.0.name = opts.name;
-        coro
+            let mut coro: Handle = Coroutine::empty();
+            coro.0.saved_context = ctx;
+            coro.0.current_stack_segment = Some(stack);
+            coro.0.state = State::Suspended;
+            coro.0.name = opts.name;
+            coro
+        })
     }
 
     /// Spawn a coroutine with default options
-    pub fn spawn<F>(f: F) -> Handle
-            where F: FnOnce() + Send + 'static {
+    pub fn spawn<F>(f: F) -> Handle where F: FnOnce() + Send + 'static {
         Coroutine::spawn_opts(f, Default::default())
     }
 
@@ -294,7 +280,8 @@ pub struct HandleGuard;
 impl HandleGuard {
     /// Get the current running Coroutine. You have to return it back!
     pub fn with<F>(&self, f: F)
-            where F: FnOnce(Handle) -> Handle + Send + 'static {
+        where F: FnOnce(Handle) -> Handle + Send + 'static {
+            
         COROUTINE_ENVIRONMENT.with(|env| {
             let env: &mut Environment = unsafe { transmute(env.get()) };
             env.current_running = Some(f(env.current_running.take().unwrap()));
@@ -310,7 +297,6 @@ thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Environment> = UnsafeCell
 struct Environment {
     stack_pool: StackPool,
     current_running: Option<Handle>,
-
     running_state: Option<Box<Any + Send>>,
 }
 
@@ -323,7 +309,6 @@ impl Environment {
         Environment {
             stack_pool: StackPool::new(),
             current_running: Some(coro),
-
             running_state: None,
         }
     }
