@@ -117,7 +117,7 @@ impl Context {
     }
 }
 
-#[link(name = "ctxswtch", kind = "static")]
+//#[link(name = "ctxswtch", kind = "static")] this line will produce duplicated -lcxswtch and cause compile failure.
 extern {
     fn rust_swap_registers(out_regs: *mut Registers, in_regs: *const Registers);
 }
