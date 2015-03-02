@@ -178,16 +178,26 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
                 env.current_running.as_mut().unwrap().0.state = State::Finished;
             }
             Err(err) => {
-                env.running_state = Some(err);
                 env.current_running.as_mut().unwrap().0.state = State::Panicked;
 
-                current().with(|cur| {
-                    match cur.name() {
-                        Some(name) => println!("Coroutine `{}` panicked", name),
-                        None => println!("Coroutine `<unnamed>` panicked"),
-                    }
-                    cur
-                });
+                {
+                    let msg = match err.downcast_ref::<&'static str>() {
+                        Some(s) => *s,
+                        None => match err.downcast_ref::<String>() {
+                            Some(s) => &s[..],
+                            None => "Box<Any>",
+                        }
+                    }.to_string();
+                    current().with(move|cur| {
+                        {
+                            let name = cur.name().unwrap_or("<unnamed>");
+                            println!("Coroutine '{}' panicked at '{}'", name, msg);
+                        }
+                        cur
+                    });
+                }
+
+                env.running_state = Some(err);
             }
         }
     });
