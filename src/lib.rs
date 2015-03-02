@@ -247,6 +247,7 @@ pub mod stack;
 mod thunk; // use self-maintained thunk, because std::thunk is temporary.
 // pub mod task;
 mod sys;
+pub mod mpmc_bounded_queue;
 
 // /// A helper macro for booting a program with libgreen
 // ///
