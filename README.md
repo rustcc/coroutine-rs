@@ -1,4 +1,4 @@
-# coroutine-rs
+# coroutine-rs [![Build Status](https://travis-ci.org/rustcc/coroutine-rs.png?branch=dev)](https://travis-ci.org/rustcc/coroutine-rs) #
 
 Coroutine library in Rust
 
