@@ -1,4 +1,4 @@
-#![feature(path, env)]
+#![feature(path)]
 extern crate gcc;
 
 use std::path::PathBuf;
@@ -24,5 +24,6 @@ fn main() {
     let src_path = &["src", "asm", arch, "_context.S"].iter().collect::<PathBuf>();
     gcc::compile_library(LIB_NAME, &[src_path.to_str().unwrap()]);
 
-    println!("cargo:rustc-flags=-l ctxswtch:static");
+// seems like this line is no need actually
+//    println!("cargo:rustc-flags=-l ctxswtch:static"); 
 }
