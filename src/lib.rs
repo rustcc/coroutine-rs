@@ -12,12 +12,16 @@
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
-#![feature(box_syntax, std_misc, os, libc, env, asm, core, alloc)]
+#![feature(box_syntax, std_misc, os, libc, asm, core, alloc, test, page_size)]
+#![feature(rustc_private)]
 
 #[macro_use] extern crate log;
 extern crate libc;
+extern crate test;
 
 pub mod context;
 pub mod coroutine;
 pub mod stack;
+pub mod mpmc_bounded_queue;
 mod sys;
+mod thunk;
