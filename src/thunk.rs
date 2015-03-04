@@ -9,10 +9,12 @@
 // except according to those terms.
 
 // a copy of the std's thunk module
+extern crate core;
+extern crate alloc;
 
-use alloc::boxed::Box;
-use core::marker::Send;
-use core::ops::FnOnce;
+use self::alloc::boxed::Box;
+use self::core::marker::Send;
+use self::core::ops::FnOnce;
 
 pub struct Thunk<'a, A=(),R=()> {
     invoke: Box<Invoke<A,R>+Send + 'a>,

@@ -17,4 +17,3 @@ log = "*"
 [lib]
 name = "coroutine"
 path = "src/lib.rs"
-
