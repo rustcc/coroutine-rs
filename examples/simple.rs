@@ -4,7 +4,7 @@ use coroutine::coroutine::{spawn, sched};
 
 fn main() {
     // Spawn a new coroutine
-    let mut coro = spawn(move|| {
+    let coro = spawn(move|| {
 
         println!("Hello in coroutine!");
 
