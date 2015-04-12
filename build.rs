@@ -1,4 +1,3 @@
-#![feature(path)]
 extern crate gcc;
 
 use std::path::PathBuf;
@@ -25,5 +24,5 @@ fn main() {
     gcc::compile_library(LIB_NAME, &[src_path.to_str().unwrap()]);
 
 // seems like this line is no need actually
-//    println!("cargo:rustc-flags=-l ctxswtch:static"); 
+//    println!("cargo:rustc-flags=-l ctxswtch:static");
 }

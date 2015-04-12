@@ -16,17 +16,17 @@ fn main() {
         // Spawn a new coroutine
         spawn(move|| {
             println!("Hello inside");
-        }).join().unwrap();
+        }).join().ok().expect("Failed to join");
 
         println!("Good bye");
     });
 
-    coro.resume().unwrap();
+    coro.resume().ok().expect("Failed to resume");
 
     println!("We are here!");
 
     // Resume the coroutine
-    coro.resume().unwrap();
+    coro.resume().ok().expect("Failed to resume");
 
     println!("Back to main.");
 }

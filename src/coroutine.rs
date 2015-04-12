@@ -1,15 +1,48 @@
-// Copyright 2013 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+// The MIT License (MIT)
 
-// Coroutines represent nothing more than a context and a stack
-// segment.
+// Copyright (c) 2015 Rustcc developers
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy of
+// this software and associated documentation files (the "Software"), to deal in
+// the Software without restriction, including without limitation the rights to
+// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+// the Software, and to permit persons to whom the Software is furnished to do so,
+// subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+// FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+// COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+// IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+//! Basic single threaded Coroutine
+//!
+//! ```rust
+//! use coroutine::coroutine::{spawn, sched};
+//!
+//! let mut coro = spawn(|| {
+//!     println!("Before yield");
+//!
+//!     // Yield back to its parent who resume this coroutine
+//!     sched();
+//!
+//!     println!("I am back!");
+//! });
+//!
+//! // Starts the Coroutine
+//! coro.resume().ok().expect("Failed to resume");
+//!
+//! println!("Back to main");
+//!
+//! // Resume it
+//! coro.resume().ok().expect("Failed to resume");
+//!
+//! println!("Coroutine finished");
+//! ```
 
 use std::default::Default;
 use std::rt::util::min_stack;
@@ -18,26 +51,43 @@ use std::mem::{transmute, transmute_copy};
 use std::rt::unwind::try;
 use std::any::Any;
 use std::cell::UnsafeCell;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::ptr;
 
 use context::Context;
 use stack::{StackPool, Stack};
 
-#[derive(Debug, Copy)]
+/// State of a Coroutine
+#[derive(Debug, Copy, Clone)]
 pub enum State {
+    /// Waiting its child to return
+    Normal,
+
+    /// Suspended. Can be waked up by `resume`
     Suspended,
+
+    /// Running
     Running,
+
+    /// Finished
     Finished,
+
+    /// Panic happened inside, cannot be resumed again
     Panicked,
 }
 
+/// Return type of resuming.
+///
+/// See `Coroutine::resume` for more detail
 pub type ResumeResult<T> = Result<T, Box<Any + Send>>;
 
 /// Coroutine spawn options
 #[derive(Debug)]
 pub struct Options {
+    /// The size of the stack
     pub stack_size: usize,
+
+    /// The name of the Coroutine
     pub name: Option<String>,
 }
 
@@ -51,7 +101,57 @@ impl Default for Options {
 }
 
 /// Handle of a Coroutine
-pub type Handle = Box<Coroutine>;
+#[derive(Debug)]
+pub struct Handle(Box<Coroutine>);
+
+impl Handle {
+    /// Make a WeakHandle to this Coroutine.
+    ///
+    /// See `Coroutine::current` for more detail.
+    pub unsafe fn downgrade(&self) -> WeakHandle {
+        WeakHandle(transmute(self.0.deref()))
+    }
+}
+
+impl Deref for Handle {
+    type Target = <Box<Coroutine> as Deref>::Target;
+
+    #[inline]
+    fn deref(&self) -> &<Box<Coroutine> as Deref>::Target {
+        self.0.deref()
+    }
+}
+
+impl DerefMut for Handle {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut <Box<Coroutine> as Deref>::Target {
+        self.0.deref_mut()
+    }
+}
+
+
+/// Weak handle of a Coroutine
+#[allow(raw_pointer_derive)]
+#[derive(Debug, Copy, Clone)]
+pub struct WeakHandle(*mut Coroutine);
+
+impl Deref for WeakHandle {
+    type Target = Coroutine;
+
+    #[inline]
+    fn deref(&self) -> &Coroutine {
+        unsafe { transmute(self.0) }
+    }
+}
+
+impl DerefMut for WeakHandle {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Coroutine {
+        unsafe { transmute(self.0) }
+    }
+}
+
+unsafe impl Send for WeakHandle {}
 
 /// A coroutine is nothing more than a (register context, stack) pair.
 #[allow(raw_pointer_derive)]
@@ -112,7 +212,8 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
                 cur.state = State::Panicked;
 
                 {
-                    use std::rt::util::Stderr;
+                    use std::io::stderr;
+                    use std::io::Write;
                     let msg = match err.downcast_ref::<&'static str>() {
                         Some(s) => *s,
                         None => match err.downcast_ref::<String>() {
@@ -123,8 +224,7 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
 
                     let name = cur.name().unwrap_or("<unnamed>");
 
-                    let mut stderr = Stderr;
-                    let _ = writeln!(&mut stderr, "Coroutine '{}' panicked at '{}'", name, msg);
+                    let _ = writeln!(&mut stderr(), "Coroutine '{}' panicked at '{}'", name, msg);
                 }
 
                 env.running_state = Some(err);
@@ -138,30 +238,31 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
 }
 
 impl Coroutine {
-    fn empty() -> Handle {
-        box Coroutine {
+    unsafe fn empty(name: Option<String>, state: State) -> Handle {
+        Handle(box Coroutine {
             current_stack_segment: None,
             saved_context: Context::empty(),
             parent: ptr::null_mut(),
-            state: State::Running,
-            name: None,
-        }
+            state: state,
+            name: name,
+        })
     }
 
-    fn with_name(name: &str) -> Handle {
-        box Coroutine {
-            current_stack_segment: None,
-            saved_context: Context::empty(),
+    fn new(name: Option<String>, stack: Stack, ctx: Context, state: State) -> Handle {
+        Handle(box Coroutine {
+            current_stack_segment: Some(stack),
+            saved_context: ctx,
             parent: ptr::null_mut(),
-            state: State::Running,
-            name: Some(name.to_string()),
-        }
+            state: state,
+            name: name,
+        })
     }
 
+    /// Spawn a Coroutine with options
     pub fn spawn_opts<F>(f: F, opts: Options) -> Handle
             where F: FnOnce() + Send + 'static {
 
-        let mut coro = COROUTINE_ENVIRONMENT.with(|env| {
+        COROUTINE_ENVIRONMENT.with(move|env| {
             unsafe {
                 let env: &mut Environment = transmute(env.get());
 
@@ -172,25 +273,18 @@ impl Coroutine {
                                    f,
                                    &mut stack);
 
-                let mut coro = Coroutine::empty();
-                coro.saved_context = ctx;
-                coro.current_stack_segment = Some(stack);
-                coro.state = State::Suspended;
-
-                coro
+                Coroutine::new(opts.name, stack, ctx, State::Suspended)
             }
-        });
-
-        coro.name = opts.name;
-        coro
+        })
     }
 
-    /// Spawn a coroutine with default options
+    /// Spawn a Coroutine with default options
     pub fn spawn<F>(f: F) -> Handle
             where F: FnOnce() + Send + 'static {
         Coroutine::spawn_opts(f, Default::default())
     }
 
+    /// Yield the current running Coroutine
     pub fn sched() {
         COROUTINE_ENVIRONMENT.with(|env| {
             let env: &mut Environment = unsafe { transmute(env.get()) };
@@ -210,6 +304,7 @@ impl Coroutine {
         });
     }
 
+    /// Resume the Coroutine
     pub fn resume(&mut self) -> ResumeResult<()> {
         match self.state() {
             State::Finished | State::Running => return Ok(()),
@@ -232,7 +327,7 @@ impl Coroutine {
         // Save state
         self.state = State::Running;
         self.parent = from_coro;
-        from_coro.state = State::Suspended;
+        from_coro.state = State::Normal;
 
         Context::swap(&mut from_coro.saved_context, &self.saved_context);
 
@@ -245,15 +340,29 @@ impl Coroutine {
         })
     }
 
-    pub fn current() -> &'static mut Coroutine {
+    /// Get a WeakHandle to the current running Coroutine.
+    ///
+    /// It is unsafe because it is an undefined behavior if you resume a Coroutine
+    /// in more than one native thread.
+    pub unsafe fn current() -> WeakHandle {
         COROUTINE_ENVIRONMENT.with(|env| {
-            unsafe {
-                let env: &mut Environment = transmute(env.get());
-                transmute(env.current_running)
-            }
+            let env: &mut Environment = transmute(env.get());
+            WeakHandle(transmute(env.current_running))
         })
     }
 
+    /// Join this Coroutine.
+    ///
+    /// If the Coroutine panicked, this method will return an `Err` with panic message.
+    ///
+    /// ```ignore
+    /// // Wait until the Coroutine exits
+    /// spawn(|| {
+    ///     println!("Before yield");
+    ///     sched();
+    ///     println!("Exiting");
+    /// }).join().unwrap();
+    /// ```
     pub fn join(&mut self) -> ResumeResult<()> {
         loop {
             match self.state() {
@@ -264,10 +373,12 @@ impl Coroutine {
         Ok(())
     }
 
+    /// Get the state of the Coroutine
     pub fn state(&self) -> State {
         self.state
     }
 
+    /// Get the name of the Coroutine
     pub fn name(&self) -> Option<&str> {
         self.name.as_ref().map(|s| &**s)
     }
@@ -277,9 +388,9 @@ thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Environment> = UnsafeCell
 
 /// Coroutine managing environment
 #[allow(raw_pointer_derive)]
-#[derive(Debug)]
 struct Environment {
     stack_pool: StackPool,
+
     current_running: *mut Coroutine,
     __main_coroutine: Handle,
 
@@ -289,8 +400,11 @@ struct Environment {
 impl Environment {
     /// Initialize a new environment
     fn new() -> Environment {
-        let mut coro = Coroutine::with_name("<Environment Root Coroutine>");
-        coro.parent = coro.deref_mut(); // Pointing to itself
+        let mut coro = unsafe {
+            let mut coro = Coroutine::empty(Some("<Environment Root Coroutine>".to_string()), State::Running);
+            coro.parent = coro.deref_mut(); // Point to itself
+            coro
+        };
 
         Environment {
             stack_pool: StackPool::new(),
@@ -303,6 +417,14 @@ impl Environment {
 }
 
 /// Coroutine configuration. Provides detailed control over the properties and behavior of new Coroutines.
+///
+/// ```ignore
+/// let mut coro = Builder::new().name(format!("Coroutine #{}", 1))
+///                              .stack_size(4096)
+///                              .spawn(|| println!("Hello world!!"));
+///
+/// coro.resume().unwrap();
+/// ```
 pub struct Builder {
     opts: Options,
 }
@@ -335,17 +457,23 @@ impl Builder {
 }
 
 /// Spawn a new Coroutine
+///
+/// Equavalent to `Coroutine::spawn`.
 pub fn spawn<F>(f: F) -> Handle
         where F: FnOnce() + Send + 'static {
     Builder::new().spawn(f)
 }
 
-// /// Get the current Coroutine
-pub fn current() -> &'static mut Coroutine {
+/// Get the current Coroutine
+///
+/// Equavalent to `Coroutine::current`.
+pub unsafe fn current() -> WeakHandle {
     Coroutine::current()
 }
 
 /// Yield the current Coroutine
+///
+/// Equavalent to `Coroutine::sched`.
 pub fn sched() {
     Coroutine::sched()
 }
@@ -362,7 +490,7 @@ mod test {
         let (tx, rx) = channel();
         Coroutine::spawn(move|| {
             tx.send(1).unwrap();
-        }).resume().unwrap();
+        }).resume().ok().expect("Failed to resume");
 
         assert_eq!(rx.recv().unwrap(), 1);
     }
@@ -377,11 +505,11 @@ mod test {
 
             tx.send(2).unwrap();
         });
-        coro.resume().unwrap();
+        coro.resume().ok().expect("Failed to resume");
         assert_eq!(rx.recv().unwrap(), 1);
         assert!(rx.try_recv().is_err());
 
-        coro.resume().unwrap();
+        coro.resume().ok().expect("Failed to resume");
 
         assert_eq!(rx.recv().unwrap(), 2);
     }
@@ -394,9 +522,9 @@ mod test {
 
             Coroutine::spawn(move|| {
                 tx.send(2).unwrap();
-            }).join().unwrap();
+            }).join().ok().expect("Failed to join");
 
-        }).join().unwrap();;
+        }).join().ok().expect("Failed to join");
 
         assert_eq!(rx.recv().unwrap(), 1);
         assert_eq!(rx.recv().unwrap(), 2);
@@ -416,7 +544,7 @@ mod test {
             let _ = Coroutine::spawn(move|| {
                 panic!("Panic inside a coroutine's child!!");
             }).join();
-        }).join().unwrap();
+        }).join().ok().expect("Failed to join");
     }
 
     #[test]
@@ -431,17 +559,17 @@ mod test {
         assert!(coro.resume().is_ok());
     }
 
-    // #[test]
-    // fn test_coroutine_resume_itself() {
-    //     let coro = Coroutine::spawn(move|| {
-    //         // Resume itself
-    //         Coroutine::current().with(|me| {
-    //             me.resume().unwrap()
-    //         });
-    //     });
+    #[test]
+    fn test_coroutine_resume_itself() {
+        let mut coro = Coroutine::spawn(move|| {
+            // Resume itself
+            unsafe {
+                Coroutine::current().resume().ok().expect("Failed to resume");
+            }
+        });
 
-    //     assert!(coro.resume().is_ok());
-    // }
+        assert!(coro.resume().is_ok());
+    }
 
     #[test]
     fn test_coroutine_yield_in_main() {
@@ -453,7 +581,7 @@ mod test {
         let (tx, rx) = channel();
         Builder::new().name("Test builder".to_string()).spawn(move|| {
             tx.send(1).unwrap();
-        }).join().unwrap();
+        }).join().ok().expect("Failed to join");
         assert_eq!(rx.recv().unwrap(), 1);
     }
 }
@@ -501,11 +629,11 @@ mod bench {
                     Coroutine::sched();
                 }
             });
-            coro.resume().unwrap();;
+            coro.resume().ok().expect("Failed to resume");
 
             let mut result = 0;
             for n in rx.iter() {
-                coro.resume().unwrap();
+                coro.resume().ok().expect("Failed to resume");
                 result += n;
             }
             assert_eq!(result, MAX_NUMBER);

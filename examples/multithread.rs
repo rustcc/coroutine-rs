@@ -1,17 +1,15 @@
-#![feature(std_misc)]
-
 extern crate coroutine;
+extern crate num_cpus;
 
 use std::thread;
-use std::rt::util::default_sched_threads;
 
 use coroutine::coroutine::Coroutine;
 
 fn main() {
 
-    let mut threads = Vec::with_capacity(default_sched_threads());
+    let mut threads = Vec::with_capacity(num_cpus::get());
 
-    for i in 0..default_sched_threads() {
+    for i in 0..num_cpus::get() {
         let t = thread::scoped(move|| {
             Coroutine::spawn(move|| {
                 let thread_id = i;
@@ -20,8 +18,8 @@ fn main() {
                         println!("Coroutine running in thread {}: counting {}", thread_id, count);
                         Coroutine::sched();
                     }
-                }).join().unwrap();
-            }).join().unwrap();
+                }).join().ok().expect("Failed to join");
+            }).join().ok().expect("Failed to join");
         });
         threads.push(t);
     }
