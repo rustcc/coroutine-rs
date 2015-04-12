@@ -10,11 +10,12 @@
 
 use std::ptr;
 use std::sync::atomic;
-use std::os::{errno, MemoryMap, MapOption};
 use std::env::{self, page_size};
 use std::fmt;
 
 use libc;
+
+use mmap::{MemoryMap, MapOption};
 
 /// A task's stack. The name "Stack" is a vestige of segmented stacks.
 pub struct Stack {
@@ -68,8 +69,8 @@ impl Stack {
         // page. It isn't guaranteed, but that's why FFI is unsafe. buf.data is
         // guaranteed to be aligned properly.
         if !protect_last_page(&stack) {
-            panic!("Could not memory-protect guard page. stack={:?}, errno={}",
-                  stack.data(), errno());
+            panic!("Could not memory-protect guard page. stack={:?}",
+                  stack.data());
         }
 
         Stack {

@@ -362,7 +362,6 @@ mod test {
     use std::sync::mpsc::channel;
     use std::rt::util::min_stack;
     use std::rt::unwind::try;
-    use std::boxed::BoxAny;
 
     use stack::Stack;
     use context::Context;

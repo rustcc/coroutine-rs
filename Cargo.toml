@@ -13,7 +13,15 @@ build = "build.rs"
 [build-dependencies]
 gcc = "*"
 log = "*"
+num_cpus = "*"
 
 [lib]
 name = "coroutine"
 path = "src/lib.rs"
+
+[dependencies]
+deque = "*"
+mmap = "*"
+
+[dev-dependencies]
+num_cpus = "*"
