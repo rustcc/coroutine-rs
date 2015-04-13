@@ -1,4 +1,4 @@
-# coroutine-rs [![Build Status](https://travis-ci.org/rustcc/coroutine-rs.png?branch=dev)](https://travis-ci.org/rustcc/coroutine-rs) #
+# coroutine-rs [![Build Status](https://travis-ci.org/rustcc/coroutine-rs.png?branch=master)](https://travis-ci.org/rustcc/coroutine-rs)
 
 Coroutine library in Rust
 
@@ -18,7 +18,7 @@ use coroutine::coroutine::{spawn, sched};
 
 fn main() {
     // Spawn a new coroutine
-    let mut coro = spawn(move|| {
+    let coro = spawn(move|| {
 
         println!("Hello in coroutine!");
 
@@ -48,8 +48,12 @@ fn main() {
 
 ## Goals
 
-* Basic single threaded coroutine support
+- [x] Basic single threaded coroutine support
 
-* Multithreaded scheduler with work stealing feature
+- [x] Clonable coroutine handle
 
-* I/O supports
+- [ ] Thread-safe: can only resume a coroutine in one thread simultaneously
+
+- [ ] Multithreaded scheduler with work stealing feature
+
+- [ ] Asynchronous I/O supports
