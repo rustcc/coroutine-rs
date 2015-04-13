@@ -136,9 +136,9 @@ impl Handle {
             };
 
             // Save state
-            to_coro.state = State::Running;
+            to_coro.set_state(State::Running);
             to_coro.parent = from_coro;
-            from_coro.state = State::Normal;
+            from_coro.set_state(State::Normal);
 
             env.current_running = self.clone();
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
@@ -182,6 +182,16 @@ impl Handle {
             c.state()
         }
     }
+
+    /// Set the state of the Coroutine
+    #[inline]
+    pub fn set_state(&self, state: State) {
+        unsafe {
+            let c: &mut Box<Coroutine> = transmute(self.as_unsafe_cell().get());
+            c.set_state(state)
+        }
+    }
+
 }
 
 impl Deref for Handle {
@@ -249,10 +259,10 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
         match ret {
             Ok(..) => {
                 env.running_state = None;
-                cur.state = State::Finished;
+                cur.set_state(State::Finished);
             }
             Err(err) => {
-                cur.state = State::Panicked;
+                cur.set_state(State::Panicked);
 
                 {
                     use std::io::stderr;
@@ -339,7 +349,7 @@ impl Coroutine {
 
             match from_coro.state() {
                 State::Finished | State::Panicked => {},
-                _ => from_coro.state = State::Suspended,
+                _ => from_coro.set_state(State::Suspended),
             }
 
             let to_coro: &mut Coroutine = transmute(from_coro.parent);
@@ -359,11 +369,18 @@ impl Coroutine {
         })
     }
 
+    #[inline(always)]
     fn state(&self) -> State {
         self.state
     }
 
+    #[inline(always)]
+    fn set_state(&mut self, state: State) {
+        self.state = state
+    }
+
     /// Get the name of the Coroutine
+    #[inline(always)]
     pub fn name(&self) -> Option<&str> {
         self.name.as_ref().map(|s| &**s)
     }
