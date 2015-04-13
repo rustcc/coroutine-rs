@@ -48,12 +48,12 @@ fn main() {
 
 ## Goals
 
-[x] Basic single threaded coroutine support
+- [x] Basic single threaded coroutine support
 
-[x] Clonable coroutine handle
+- [x] Clonable coroutine handle
 
-[ ] Thread-safe: can only resume a coroutine in one thread simultaneously
+- [ ] Thread-safe: can only resume a coroutine in one thread simultaneously
 
-[ ] Multithreaded scheduler with work stealing feature
+- [ ] Multithreaded scheduler with work stealing feature
 
-[ ] Asynchronous I/O supports
+- [ ] Asynchronous I/O supports
