@@ -1,10 +1,19 @@
-# coroutine-rs [![Build Status](https://travis-ci.org/rustcc/coroutine-rs.png?branch=master)](https://travis-ci.org/rustcc/coroutine-rs)
+# coroutine-rs
+
+[![Build Status](https://travis-ci.org/rustcc/coroutine-rs.png?branch=master)](https://travis-ci.org/rustcc/coroutine-rs)
 
 Coroutine library in Rust
 
 ```toml
 [dependencies.coroutine-rs]
 git = "https://github.com/rustcc/coroutine-rs.git"
+```
+
+or
+
+```toml
+[dependencies]
+coroutine = "*"
 ```
 
 ## Usage

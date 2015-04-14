@@ -1,6 +1,6 @@
 [package]
-name = "coroutine-rs"
-version = "0.0.1"
+name = "coroutine"
+version = "0.1.0"
 authors = [
     "Y. T. Chung <zonyitoo@gmail.com>",
     "Young.Wu <doomsplayer@gmail.com>",
@@ -12,6 +12,7 @@ description = "Coroutine Library in Rust"
 readme = "README.md"
 homepage = "https://github.com/rustcc/coroutine-rs"
 build = "build.rs"
+keywords = ["coroutine", "green", "thread", "fiber"]
 
 [build-dependencies]
 gcc = "*"
