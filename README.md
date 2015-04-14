@@ -23,7 +23,7 @@ Basic usage of Coroutine
 ```rust
 extern crate coroutine;
 
-use coroutine::coroutine::{spawn, sched};
+use coroutine::{spawn, sched};
 
 fn main() {
     // Spawn a new coroutine

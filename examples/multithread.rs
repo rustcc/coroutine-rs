@@ -3,7 +3,7 @@ extern crate num_cpus;
 
 use std::thread;
 
-use coroutine::coroutine::Coroutine;
+use coroutine::{spawn, sched};
 
 fn main() {
 
@@ -11,12 +11,12 @@ fn main() {
 
     for i in 0..num_cpus::get() {
         let t = thread::scoped(move|| {
-            Coroutine::spawn(move|| {
+            spawn(move|| {
                 let thread_id = i;
-                Coroutine::spawn(move|| {
+                spawn(move|| {
                     for count in 0..10 {
                         println!("Coroutine running in thread {}: counting {}", thread_id, count);
-                        Coroutine::sched();
+                        sched();
                     }
                 }).join().ok().expect("Failed to join");
             }).join().ok().expect("Failed to join");
