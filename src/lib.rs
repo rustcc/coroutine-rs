@@ -26,5 +26,6 @@ pub use self::coroutine::Builder;
 pub mod context;
 pub mod coroutine;
 pub mod stack;
+pub mod processor;
 mod thunk; // use self-maintained thunk, because std::thunk is temporary.
 mod sys;
