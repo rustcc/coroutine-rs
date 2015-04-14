@@ -9,6 +9,13 @@ Coroutine library in Rust
 git = "https://github.com/rustcc/coroutine-rs.git"
 ```
 
+or
+
+```toml
+[dependencies]
+coroutine = "*"
+```
+
 ## Usage
 
 Basic usage of Coroutine
