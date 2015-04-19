@@ -1,3 +1,4 @@
+#![feature(scoped)]
 extern crate coroutine;
 extern crate num_cpus;
 
