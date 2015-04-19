@@ -127,7 +127,7 @@ extern {
 // These structures all represent a context of one task throughout its
 // execution. Each struct is a representation of the architecture's register
 // set. When swapping between tasks, these register sets are used to save off
-// the current registers isizeo one struct, and load them all from another.
+// the current registers into one struct, and load them all from another.
 //
 // Note that this is only used for context switching, which means that some of
 // the registers may go unused. For example, for architectures with
@@ -169,7 +169,7 @@ impl Registers {
 
 #[cfg(target_arch = "x86")]
 fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkptr: *mut (), sp: *mut usize) {
-    // x86 has isizeeresting stack alignment requirements, so do some alignment
+    // x86 has interesting stack alignment requirements, so do some alignment
     // plus some offsetting to figure out what the actual stack should be.
     let sp = align_down(sp);
     let sp = mut_offset(sp, -4); // dunno why offset 4, TODO
@@ -190,7 +190,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
     regs.esp = sp as u32;
     regs.eip = fptr as u32;
 
-    // Last base poisizeer on the stack is 0
+    // Last base pointer on the stack is 0
     regs.ebp = 0;
 }
 
@@ -257,7 +257,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
     debug!("arg {:#x}", arg);
     debug!("sp {:?}", sp);
 
-    // These registers are frobbed by rust_bootstrap_green_task isizeo the right
+    // These registers are frobbed by rust_bootstrap_green_task into the right
     // location so we can invoke the "real init function", `fptr`.
     regs.gpr[RUSTRT_R12] = arg as libc::uintptr_t;
     regs.gpr[RUSTRT_R13] = thunkptr as libc::uintptr_t;
@@ -270,7 +270,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
     regs.gpr[RUSTRT_RSP] = sp as libc::uintptr_t;
     regs.gpr[RUSTRT_IP] = rust_bootstrap_green_task as libc::uintptr_t;
 
-    // Last base poisizeer on the stack should be 0
+    // Last base pointer on the stack should be 0
     regs.gpr[RUSTRT_RBP] = 0;
 }
 
@@ -301,7 +301,7 @@ fn initialize_call_frame(regs: &mut Registers, fptr: InitFn, arg: usize, thunkpt
 
     // ARM uses the same technique as x86_64 to have a landing pad for the start
     // of all new green tasks. Neither r1/r2 are saved on a context switch, so
-    // the shim will copy r3/r4 isizeo r1/r2 and then execute the function in r5
+    // the shim will copy r3/r4 into r1/r2 and then execute the function in r5
     regs[0] = arg as libc::uintptr_t;              // r0
     regs[3] = thunkptr as libc::uintptr_t;         // r3
     regs[5] = fptr as libc::uintptr_t;             // r5
