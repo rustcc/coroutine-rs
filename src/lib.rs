@@ -22,6 +22,7 @@ extern crate deque;
 extern crate mmap;
 
 pub use self::coroutine::Builder;
+pub use self::coroutine::{Coroutine, spawn, sched, current};
 
 pub mod context;
 pub mod coroutine;

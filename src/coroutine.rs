@@ -22,9 +22,9 @@
 //! Basic single threaded Coroutine
 //!
 //! ```rust
-//! use coroutine::coroutine::{spawn, sched};
+//! use coroutine::{spawn, sched};
 //!
-//! let mut coro = spawn(|| {
+//! let coro = spawn(|| {
 //!     println!("Before yield");
 //!
 //!     // Yield back to its parent who resume this coroutine
@@ -440,9 +440,9 @@ impl Environment {
 /// Coroutine configuration. Provides detailed control over the properties and behavior of new Coroutines.
 ///
 /// ```ignore
-/// let mut coro = Builder::new().name(format!("Coroutine #{}", 1))
-///                              .stack_size(4096)
-///                              .spawn(|| println!("Hello world!!"));
+/// let coro = Builder::new().name(format!("Coroutine #{}", 1))
+///                          .stack_size(4096)
+///                          .spawn(|| println!("Hello world!!"));
 ///
 /// coro.resume().unwrap();
 /// ```
