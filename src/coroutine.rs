@@ -492,6 +492,13 @@ pub fn current() -> Handle {
     Coroutine::current()
 }
 
+/// Resume a Coroutine
+///
+/// Equavalent to `Coroutine::resume`.
+pub fn resume(coro: &Handle) -> ResumeResult<()> {
+    coro.resume()
+}
+
 /// Yield the current Coroutine
 ///
 /// Equavalent to `Coroutine::sched`.
