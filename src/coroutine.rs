@@ -472,8 +472,15 @@ pub fn spawn<F>(f: F) -> Handle
 /// Get the current Coroutine
 ///
 /// Equavalent to `Coroutine::current`.
-pub unsafe fn current() -> Handle {
+pub fn current() -> Handle {
     Coroutine::current()
+}
+
+/// Resume a Coroutine
+///
+/// Equavalent to `Coroutine::resume`.
+pub fn resume(coro: &Handle) -> ResumeResult<()> {
+    coro.resume()
 }
 
 /// Yield the current Coroutine
