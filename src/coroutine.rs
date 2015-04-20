@@ -488,7 +488,7 @@ pub fn spawn<F>(f: F) -> Handle
 /// Get the current Coroutine
 ///
 /// Equavalent to `Coroutine::current`.
-pub unsafe fn current() -> Handle {
+pub fn current() -> Handle {
     Coroutine::current()
 }
 

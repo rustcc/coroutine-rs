@@ -13,7 +13,7 @@
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
 #![feature(box_syntax, std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size)]
-#![feature(rustc_private)]
+#![feature(rustc_private, optin_builtin_traits)]
 
 #[macro_use] extern crate log;
 extern crate libc;
@@ -28,5 +28,6 @@ pub mod context;
 pub mod coroutine;
 pub mod stack;
 pub mod processor;
+pub mod sync;
 mod thunk; // use self-maintained thunk, because std::thunk is temporary.
 mod sys;
