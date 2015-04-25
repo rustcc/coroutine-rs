@@ -5,7 +5,7 @@
 Coroutine library in Rust
 
 ```toml
-[dependencies.coroutine-rs]
+[dependencies.coroutine]
 git = "https://github.com/rustcc/coroutine-rs.git"
 ```
 
