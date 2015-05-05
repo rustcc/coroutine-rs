@@ -252,42 +252,40 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
 
     let ret = unsafe { try(move|| func.invoke(())) };
 
-    let state = COROUTINE_ENVIRONMENT.with(move|env| {
-        let env: &mut Environment = unsafe { transmute(env.get()) };
+    let env = Environment::current();
 
-        let cur: &mut Box<Coroutine> = unsafe {
-            transmute(env.current_running.as_unsafe_cell().get())
-        };
+    let cur: &mut Box<Coroutine> = unsafe {
+        &mut *env.current_running.as_unsafe_cell().get()
+    };
 
-        match ret {
-            Ok(..) => {
-                env.running_state = None;
+    let state = match ret {
+        Ok(..) => {
+            env.running_state = None;
 
-                State::Finished
-            }
-            Err(err) => {
-                {
-                    use std::io::stderr;
-                    use std::io::Write;
-                    let msg = match err.downcast_ref::<&'static str>() {
-                        Some(s) => *s,
-                        None => match err.downcast_ref::<String>() {
-                            Some(s) => &s[..],
-                            None => "Box<Any>",
-                        }
-                    };
-
-                    let name = cur.name().unwrap_or("<unnamed>");
-
-                    let _ = writeln!(&mut stderr(), "Coroutine '{}' panicked at '{}'", name, msg);
-                }
-
-                env.running_state = Some(err);
-
-                State::Panicked
-            }
+            State::Finished
         }
-    });
+        Err(err) => {
+            {
+                use std::io::stderr;
+                use std::io::Write;
+                let msg = match err.downcast_ref::<&'static str>() {
+                    Some(s) => *s,
+                    None => match err.downcast_ref::<String>() {
+                        Some(s) => &s[..],
+                        None => "Box<Any>",
+                    }
+                };
+
+                let name = cur.name().unwrap_or("<unnamed>");
+
+                let _ = writeln!(&mut stderr(), "Coroutine '{}' panicked at '{}'", name, msg);
+            }
+
+            env.running_state = Some(err);
+
+            State::Panicked
+        }
+    };
 
     loop {
         Coroutine::yield_now(state);
@@ -319,20 +317,15 @@ impl Coroutine {
     pub fn spawn_opts<F>(f: F, opts: Options) -> Handle
             where F: FnOnce() + Send + 'static {
 
-        COROUTINE_ENVIRONMENT.with(move|env| {
-            unsafe {
-                let env: &mut Environment = transmute(env.get());
+        let env = Environment::current();
+        let mut stack = env.stack_pool.take_stack(opts.stack_size);
 
-                let mut stack = env.stack_pool.take_stack(opts.stack_size);
+        let ctx = Context::new(coroutine_initialize,
+                           0,
+                           f,
+                           &mut stack);
 
-                let ctx = Context::new(coroutine_initialize,
-                                   0,
-                                   f,
-                                   &mut stack);
-
-                Coroutine::new(opts.name, stack, ctx, State::Suspended)
-            }
-        })
+        Coroutine::new(opts.name, stack, ctx, State::Suspended)
     }
 
     /// Spawn a Coroutine with default options
@@ -347,18 +340,15 @@ impl Coroutine {
         // Cannot yield with Running state
         assert!(state != State::Running);
 
-        COROUTINE_ENVIRONMENT.with(|env| unsafe {
-            let env: &mut Environment = transmute(env.get());
-
-            let from_coro: &mut Box<Coroutine> = {
-                transmute(env.current_running.as_unsafe_cell().get())
-            };
-
+        let env = Environment::current();
+        unsafe {
+            let from_coro: &mut Box<Coroutine> =
+                &mut *env.current_running.as_unsafe_cell().get();
             from_coro.set_state(state);
 
             let to_coro: &mut Coroutine = transmute(from_coro.parent);
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
-        })
+        }
     }
 
     /// Yield the current running Coroutine with `Suspended` state
@@ -379,10 +369,7 @@ impl Coroutine {
     /// in more than one native thread.
     #[inline]
     pub fn current() -> Handle {
-        COROUTINE_ENVIRONMENT.with(move|env| unsafe {
-            let env: &mut Environment = transmute(env.get());
-            env.current_running.clone()
-        })
+        Environment::current().current_running.clone()
     }
 
     #[inline(always)]
@@ -434,6 +421,12 @@ impl Environment {
 
             running_state: None,
         }
+    }
+
+    fn current() -> &'static mut Environment {
+        COROUTINE_ENVIRONMENT.with(|env| unsafe {
+            &mut *env.get()
+        })
     }
 }
 
