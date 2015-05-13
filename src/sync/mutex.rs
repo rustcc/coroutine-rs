@@ -29,7 +29,6 @@ use coroutine::{self, Coroutine, Handle};
 pub struct Mutex<T> {
     lock: SpinLock,
     inner: UnsafeCell<T>,
-    wait_list: UnsafeCell<VecDeque<Handle>>,
 }
 
 impl<T> Mutex<T> {
@@ -37,7 +36,6 @@ impl<T> Mutex<T> {
         Mutex {
             lock: SpinLock::new(),
             inner: UnsafeCell::new(inner),
-            wait_list: UnsafeCell::new(VecDeque::new()),
         }
     }
 
@@ -49,11 +47,6 @@ impl<T> Mutex<T> {
 
     pub fn lock<'a>(&'a self) -> LockGuard<'a, T> {
         if !self.lock.try_lock() {
-            let current = coroutine::current();
-            unsafe {
-                let wait_list: &mut VecDeque<Handle> = &mut *self.wait_list.get();
-                wait_list.push_back(current);
-            }
             coroutine::sched();
         }
 
@@ -70,17 +63,6 @@ impl<T> Mutex<T> {
 
     fn unlock(&self) {
         self.lock.unlock();
-        let front = unsafe {
-            let wait_list: &mut VecDeque<Handle> = &mut *self.wait_list.get();
-            wait_list.pop_front()
-        };
-
-        match front {
-            Some(hdl) => {
-                coroutine::resume(&hdl).unwrap();
-            },
-            None => {}
-        }
     }
 }
 
@@ -129,6 +111,7 @@ impl<'a, T: 'a> DerefMut for LockGuard<'a, T> {
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
+    use std::thread;
 
     use coroutine::{spawn, sched};
 
@@ -136,17 +119,29 @@ mod test {
 
     #[test]
     fn test_mutex_basic() {
-        let lock = Arc::new(Mutex::new(1));
+        let lock = Arc::new(Mutex::new(0));
+
+        let mut futs = Vec::new();
 
         for _ in 0..10 {
+            println!("??");
             let lock = lock.clone();
-            spawn(move|| {
-                let mut guard = lock.lock();
-
-                *guard += 1;
-            }).resume();
+            let fut = thread::scoped(move|| {
+                spawn(move|| {
+                    let mut guard = lock.lock();
+                    for _ in 0..100_0000 {
+                        *guard += 1;
+                    }
+                    println!("HERE!!");
+                }).resume().unwrap();
+            });
+            futs.push(fut);
         }
 
-        assert_eq!(*lock.lock(), 11);
+        for fut in futs.into_iter() {
+            fut.join();
+        }
+
+        assert_eq!(*lock.lock(), 100_0000 * 10);
     }
 }

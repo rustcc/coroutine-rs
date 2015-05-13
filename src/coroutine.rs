@@ -125,33 +125,31 @@ impl Handle {
             _ => {}
         }
 
-        COROUTINE_ENVIRONMENT.with(|env| {
-            let env: &mut Environment = unsafe { transmute(env.get()) };
+        let env = Environment::current();
 
-            let from_coro_hdl = Coroutine::current();
-            let from_coro: &mut Coroutine = unsafe {
-                let c: &mut Box<Coroutine> = transmute(from_coro_hdl.as_unsafe_cell().get());
-                c.deref_mut()
-            };
+        let from_coro_hdl = Coroutine::current();
+        let from_coro: &mut Coroutine = unsafe {
+            let c: &mut Box<Coroutine> = &mut *from_coro_hdl.as_unsafe_cell().get();
+            c.deref_mut()
+        };
 
-            let to_coro: &mut Box<Coroutine> = unsafe {
-                transmute(self.as_unsafe_cell().get())
-            };
+        let to_coro: &mut Box<Coroutine> = unsafe {
+            &mut *self.as_unsafe_cell().get()
+        };
 
-            // Save state
-            to_coro.set_state(State::Running);
-            to_coro.parent = from_coro;
-            from_coro.set_state(State::Normal);
+        // Save state
+        to_coro.set_state(State::Running);
+        to_coro.parent = from_coro;
+        from_coro.set_state(State::Normal);
 
-            env.current_running = self.clone();
-            Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
-            env.current_running = from_coro_hdl;
+        env.current_running = self.clone();
+        Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
+        env.current_running = from_coro_hdl;
 
-            match env.running_state.take() {
-                Some(err) => Err(err),
-                None => Ok(()),
-            }
-        })
+        match env.running_state.take() {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 
     /// Join this Coroutine.
@@ -181,7 +179,7 @@ impl Handle {
     #[inline]
     pub fn state(&self) -> State {
         unsafe {
-            let c: &mut Box<Coroutine> = transmute(self.as_unsafe_cell().get());
+            let c: &mut Box<Coroutine> = &mut *self.as_unsafe_cell().get();
             c.state()
         }
     }
@@ -190,7 +188,7 @@ impl Handle {
     #[inline]
     pub fn set_state(&self, state: State) {
         unsafe {
-            let c: &mut Box<Coroutine> = transmute(self.as_unsafe_cell().get());
+            let c: &mut Box<Coroutine> = &mut *self.as_unsafe_cell().get();
             c.set_state(state)
         }
     }
@@ -236,10 +234,8 @@ impl Drop for Coroutine {
     fn drop(&mut self) {
         match self.current_stack_segment.take() {
             Some(stack) => {
-                COROUTINE_ENVIRONMENT.with(|env| {
-                    let env: &mut Environment = unsafe { transmute(env.get()) };
-                    env.stack_pool.give_stack(stack);
-                });
+                let env = Environment::current();
+                env.stack_pool.give_stack(stack);
             },
             None => {}
         }
@@ -346,7 +342,7 @@ impl Coroutine {
                 &mut *env.current_running.as_unsafe_cell().get();
             from_coro.set_state(state);
 
-            let to_coro: &mut Coroutine = transmute(from_coro.parent);
+            let to_coro: &mut Coroutine = &mut *from_coro.parent;
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
         }
     }
@@ -408,7 +404,7 @@ impl Environment {
         let coro = unsafe {
             let coro = Coroutine::empty(Some("<Environment Root Coroutine>".to_string()), State::Running);
             coro.borrow_mut().parent = {
-                let itself: &mut Box<Coroutine> = transmute(coro.as_unsafe_cell().get());
+                let itself: &mut Box<Coroutine> = &mut *coro.as_unsafe_cell().get();
                 itself.deref_mut()
             }; // Point to itself
             coro
