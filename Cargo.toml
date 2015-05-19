@@ -25,14 +25,12 @@ enable-stack-recycle = []
 [build-dependencies]
 gcc = "*"
 log = "*"
-num_cpus = "*"
 
 [lib]
 name = "coroutine"
 path = "src/lib.rs"
 
 [dependencies]
-deque = "*"
 mmap = "*"
 
 [dev-dependencies]

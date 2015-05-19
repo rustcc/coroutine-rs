@@ -18,7 +18,6 @@
 #[macro_use] extern crate log;
 extern crate libc;
 extern crate test;
-extern crate deque;
 extern crate mmap;
 
 pub use coroutine::Builder;
