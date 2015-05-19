@@ -21,11 +21,11 @@ extern crate test;
 extern crate deque;
 extern crate mmap;
 
-pub use self::coroutine::Builder;
-pub use self::coroutine::{Coroutine, spawn, sched, current};
+pub use coroutine::Builder;
+pub use coroutine::{Coroutine, spawn, sched, current};
 
 pub mod context;
 pub mod coroutine;
 pub mod stack;
-mod thunk; // use self-maintained thunk, because std::thunk is temporary.
+mod thunk; // use self-maintained thunk, because std::thunk is temporary. May be replaced by FnBox in the future.
 mod sys;

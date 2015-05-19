@@ -43,6 +43,37 @@
 //!
 //! println!("Coroutine finished");
 //! ```
+//!
+
+/* Here is the coroutine(with scheduler) workflow:
+ *
+ *                               --------------------------------
+ * --------------------------    |                              |
+ * |                        |    v                              |
+ * |                  ----------------                          |  III.Coroutine::yield_now()
+ * |             ---> |   Scheduler  |  <-----                  |
+ * |    parent   |    ----------------       |   parent         |
+ * |             |           ^ parent        |                  |
+ * |   --------------  --------------  --------------           |
+ * |   |Coroutine(1)|  |Coroutine(2)|  |Coroutine(3)|  ----------
+ * |   --------------  --------------  --------------
+ * |         ^            |     ^
+ * |         |            |     |  II.do_some_works
+ * -----------            -------
+ *   I.Handle.resume()
+ *
+ *
+ *  First, all coroutines have a link to a parent coroutine, which was set when the coroutine resumed.
+ *  In the scheduler/coroutine model, every worker coroutine has a parent pointer pointing to 
+ *  the scheduler coroutine(which is a raw thread).
+ *  Scheduler resumes a proper coroutine and set the parent pointer, like procedure I does.
+ *  When a coroutine is awaken, it does some work like procedure II does.
+ *  When a coroutine yield(io, finished, paniced or sched), it resumes its parent's context, 
+ *  like procedure III does.
+ *  Now the scheduler is awake again and it simply decides whether to put the coroutine to queue again or not, 
+ *  according to the coroutine's return status.
+ *  And last, the scheduler continues the scheduling loop and selects a proper coroutine to wake up.
+ */
 
 use std::default::Default;
 use std::rt::util::min_stack;
@@ -116,7 +147,10 @@ impl Handle {
     fn new(c: Box<Coroutine>) -> Handle {
         Handle(Arc::new(RefCell::new(c)))
     }
-
+    unsafe fn get_inner(&self) -> &mut Coroutine {
+        let c: &mut Box<Coroutine> = &mut *self.as_unsafe_cell().get();
+        c.deref_mut()
+    }
     /// Resume the Coroutine
     pub fn resume(&self) -> ResumeResult<()> {
         match self.state() {
@@ -128,22 +162,19 @@ impl Handle {
         let env = Environment::current();
 
         let from_coro_hdl = Coroutine::current();
-        let from_coro: &mut Coroutine = unsafe {
-            let c: &mut Box<Coroutine> = &mut *from_coro_hdl.as_unsafe_cell().get();
-            c.deref_mut()
-        };
+        {
+            let from_coro: &mut Coroutine = unsafe { from_coro_hdl.get_inner() };
+            
+            let to_coro: &mut Coroutine = unsafe { self.get_inner() };
 
-        let to_coro: &mut Box<Coroutine> = unsafe {
-            &mut *self.as_unsafe_cell().get()
-        };
-
-        // Save state
-        to_coro.set_state(State::Running);
-        to_coro.parent = from_coro;
-        from_coro.set_state(State::Normal);
-
-        env.current_running = self.clone();
-        Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
+            // Save state
+            to_coro.set_state(State::Running);
+            to_coro.parent = from_coro;
+            from_coro.set_state(State::Normal);
+            
+            env.current_running = self.clone();
+            Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
+        }
         env.current_running = from_coro_hdl;
 
         match env.running_state.take() {
@@ -178,19 +209,13 @@ impl Handle {
     /// Get the state of the Coroutine
     #[inline]
     pub fn state(&self) -> State {
-        unsafe {
-            let c: &mut Box<Coroutine> = &mut *self.as_unsafe_cell().get();
-            c.state()
-        }
+        unsafe { self.get_inner().state() }
     }
 
     /// Set the state of the Coroutine
     #[inline]
     pub fn set_state(&self, state: State) {
-        unsafe {
-            let c: &mut Box<Coroutine> = &mut *self.as_unsafe_cell().get();
-            c.set_state(state)
-        }
+        unsafe { self.get_inner().set_state(state) }
     }
 
 }
@@ -330,7 +355,7 @@ impl Coroutine {
         Coroutine::spawn_opts(f, Default::default())
     }
 
-    /// Yield the current running Coroutine
+    /// Yield the current running Coroutine to its parent
     #[inline]
     pub fn yield_now(state: State) {
         // Cannot yield with Running state
@@ -338,8 +363,7 @@ impl Coroutine {
 
         let env = Environment::current();
         unsafe {
-            let from_coro: &mut Box<Coroutine> =
-                &mut *env.current_running.as_unsafe_cell().get();
+            let from_coro = env.current_running.get_inner();
             from_coro.set_state(state);
 
             let to_coro: &mut Coroutine = &mut *from_coro.parent;
@@ -403,10 +427,7 @@ impl Environment {
     fn new() -> Environment {
         let coro = unsafe {
             let coro = Coroutine::empty(Some("<Environment Root Coroutine>".to_string()), State::Running);
-            coro.borrow_mut().parent = {
-                let itself: &mut Box<Coroutine> = &mut *coro.as_unsafe_cell().get();
-                itself.deref_mut()
-            }; // Point to itself
+            coro.borrow_mut().parent = coro.get_inner(); // Point to itself
             coro
         };
 
