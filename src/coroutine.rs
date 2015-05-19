@@ -82,7 +82,7 @@ use std::mem::transmute;
 use std::rt::unwind::try;
 use std::any::Any;
 use std::cell::UnsafeCell;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::ptr;
 use std::sync::Arc;
 use std::cell::RefCell;
@@ -138,24 +138,22 @@ impl Default for Options {
 
 /// Handle of a Coroutine
 #[derive(Debug, Clone)]
-pub struct Handle(Arc<RefCell<Box<Coroutine>>>);
+pub struct Handle(Arc<RefCell<Coroutine>>);
 
 unsafe impl Send for Handle {}
 unsafe impl Sync for Handle {}
 
 impl Handle {
-    fn new(c: Box<Coroutine>) -> Handle {
+    fn new(c: Coroutine) -> Handle {
         Handle(Arc::new(RefCell::new(c)))
     }
 
     unsafe fn get_inner_mut(&self) -> &mut Coroutine {
-        let c: &mut Box<Coroutine> = &mut *self.0.as_unsafe_cell().get();
-        c.deref_mut()
+        &mut *self.0.as_unsafe_cell().get()
     }
 
     unsafe fn get_inner(&self) -> &Coroutine {
-        let c: &Box<Coroutine> = &*self.0.as_unsafe_cell().get();
-        c.deref()
+        &*self.0.as_unsafe_cell().get()
     }
 
     /// Resume the Coroutine
@@ -319,7 +317,7 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
 
 impl Coroutine {
     unsafe fn empty(name: Option<String>, state: State) -> Handle {
-        Handle::new(box Coroutine {
+        Handle::new(Coroutine {
             current_stack_segment: None,
             saved_context: Context::empty(),
             parent: ptr::null_mut(),
@@ -329,7 +327,7 @@ impl Coroutine {
     }
 
     fn new(name: Option<String>, stack: Stack, ctx: Context, state: State) -> Handle {
-        Handle::new(box Coroutine {
+        Handle::new(Coroutine {
             current_stack_segment: Some(stack),
             saved_context: ctx,
             parent: ptr::null_mut(),
