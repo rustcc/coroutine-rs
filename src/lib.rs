@@ -12,13 +12,12 @@
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
-#![feature(box_syntax, std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size)]
+#![feature(std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size)]
 #![feature(rustc_private)]
 
 #[macro_use] extern crate log;
 extern crate libc;
 extern crate test;
-extern crate deque;
 extern crate mmap;
 
 pub use coroutine::Builder;

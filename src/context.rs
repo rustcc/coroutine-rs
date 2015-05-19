@@ -38,7 +38,7 @@ pub type InitFn = extern "C" fn(usize, *mut ()) -> !; // first argument is task 
 impl Context {
     pub fn empty() -> Context {
         Context {
-            regs: box Registers::new(),
+            regs: Box::new(Registers::new()),
             stack_bounds: None,
         }
     }
@@ -58,7 +58,7 @@ impl Context {
         let sp: *mut usize = sp as *mut usize;
         // Save and then immediately load the current context,
         // which we will then modify to call the given function when restored
-        let mut regs = box Registers::new();
+        let mut regs = Box::new(Registers::new());
 
         initialize_call_frame(&mut regs, init, arg, unsafe { transmute(Box::new(Thunk::new(start))) }, sp);
 

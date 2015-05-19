@@ -29,7 +29,7 @@ impl<'a, R> Thunk<'a,(),R> {
 impl<'a,A,R> Thunk<'a,A,R> {
     pub fn with_arg<F>(func: F) -> Thunk<'a,A,R> where F : FnOnce(A) -> R, F : Send + 'a {
         Thunk {
-            invoke: box func
+            invoke: Box::new(func)
         }
     }
 
