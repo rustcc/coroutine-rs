@@ -21,6 +21,9 @@
 
 use std::sync::mpsc;
 
+use coroutine::Coroutine;
+
+#[derive(Clone)]
 pub struct Sender<T> {
     inner: mpsc::Sender<T>,
 }
@@ -35,6 +38,23 @@ impl<T> !Sync for SyncSender<T> {}
 
 pub struct Receiver<T> {
     inner: mpsc::Receiver<T>,
+}
+
+impl<T> Sender<T> {
+    fn new(inner: mpsc::Sender<T>) -> Sender<T> {
+        Sender {
+            inner: inner,
+        }
+    }
+
+    pub fn send(&self, data: T) -> Result<(), mpsc::SendError<T>> {
+        try!(self.inner.send(data));
+        Coroutine::sched();
+    }
+
+    pub fn try_send(&self, data: T) -> Result<(), mpsc::TrySendError<T>> {
+
+    }
 }
 
 

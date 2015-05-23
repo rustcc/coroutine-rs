@@ -83,7 +83,6 @@ use std::rt::unwind::try;
 use std::any::Any;
 use std::cell::UnsafeCell;
 use std::ops::Deref;
-use std::ptr;
 use std::sync::Arc;
 use std::cell::RefCell;
 
@@ -174,13 +173,11 @@ impl Handle {
 
             // Save state
             to_coro.set_state(State::Running);
-            to_coro.parent = from_coro;
             from_coro.set_state(State::Normal);
 
-            env.current_running = self.clone();
+            env.coroutine_stack.push(self.clone());
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
         }
-        env.current_running = from_coro_hdl;
 
         match env.running_state.take() {
             Some(err) => Err(err),
@@ -245,9 +242,6 @@ pub struct Coroutine {
     /// Always valid if the task is alive and not running.
     saved_context: Context,
 
-    /// Parent coroutine, will always be valid
-    parent: *mut Coroutine,
-
     /// State
     state: State,
 
@@ -279,7 +273,9 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
 
     let env = Environment::current();
 
-    let cur: &mut Coroutine = unsafe { env.current_running.get_inner_mut() };
+    let cur: &mut Coroutine = unsafe {
+        env.coroutine_stack.last().expect("Impossible happened! No current coroutine!").get_inner_mut()
+    };
 
     let state = match ret {
         Ok(..) => {
@@ -320,7 +316,6 @@ impl Coroutine {
         Handle::new(Coroutine {
             current_stack_segment: None,
             saved_context: Context::empty(),
-            parent: ptr::null_mut(),
             state: state,
             name: name,
         })
@@ -330,7 +325,6 @@ impl Coroutine {
         Handle::new(Coroutine {
             current_stack_segment: Some(stack),
             saved_context: ctx,
-            parent: ptr::null_mut(),
             state: state,
             name: name,
         })
@@ -364,12 +358,19 @@ impl Coroutine {
         assert!(state != State::Running);
 
         let env = Environment::current();
-        unsafe {
-            let from_coro = env.current_running.get_inner_mut();
-            from_coro.set_state(state);
+        if env.coroutine_stack.len() == 1 {
+            // Environment root
+            return;
+        }
 
-            let to_coro: &mut Coroutine = &mut *from_coro.parent;
-            Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
+        unsafe {
+            match (env.coroutine_stack.pop(), env.coroutine_stack.last()) {
+                (Some(from_coro), Some(to_coro)) => {
+                    from_coro.set_state(state);
+                    Context::swap(&mut from_coro.get_inner_mut().saved_context, &to_coro.saved_context);
+                },
+                _ => unreachable!()
+            }
         }
     }
 
@@ -391,7 +392,8 @@ impl Coroutine {
     /// in more than one native thread.
     #[inline]
     pub fn current() -> Handle {
-        Environment::current().current_running.clone()
+        Environment::current().coroutine_stack.last().map(|hdl| hdl.clone())
+            .expect("Impossible happened! No current coroutine!")
     }
 
     #[inline(always)]
@@ -418,8 +420,7 @@ thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Environment> = UnsafeCell
 struct Environment {
     stack_pool: StackPool,
 
-    current_running: Handle,
-    __main_coroutine: Handle,
+    coroutine_stack: Vec<Handle>,
 
     running_state: Option<Box<Any + Send>>,
 }
@@ -427,16 +428,16 @@ struct Environment {
 impl Environment {
     /// Initialize a new environment
     fn new() -> Environment {
-        let coro = unsafe {
+        let st = unsafe {
+            let mut st = Vec::new();
             let coro = Coroutine::empty(Some("<Environment Root Coroutine>".to_string()), State::Running);
-            coro.0.borrow_mut().parent = coro.get_inner_mut(); // Point to itself
-            coro
+            st.push(coro);
+            st
         };
 
         Environment {
             stack_pool: StackPool::new(),
-            current_running: coro.clone(),
-            __main_coroutine: coro,
+            coroutine_stack: st,
 
             running_state: None,
         }
