@@ -1,6 +1,6 @@
 [package]
 name = "coroutine"
-version = "0.1.4"
+version = "0.1.6"
 authors = [
     "Y. T. Chung <zonyitoo@gmail.com>",
     "Young.Wu <doomsplayer@gmail.com>",
@@ -14,17 +14,23 @@ homepage = "https://github.com/rustcc/coroutine-rs"
 build = "build.rs"
 keywords = ["coroutine", "green", "thread", "fiber"]
 
+[features]
+
+default = [
+    "enable-stack-recycle"
+]
+
+enable-stack-recycle = []
+
 [build-dependencies]
 gcc = "*"
 log = "*"
-num_cpus = "*"
 
 [lib]
 name = "coroutine"
 path = "src/lib.rs"
 
 [dependencies]
-deque = "*"
 mmap = "*"
 
 [dev-dependencies]

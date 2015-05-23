@@ -12,23 +12,19 @@
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
-#![feature(box_syntax, std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size)]
-#![feature(rustc_private, optin_builtin_traits)]
-#![feature(scoped)]
+#![feature(std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size)]
+#![feature(rustc_private)]
 
 #[macro_use] extern crate log;
 extern crate libc;
 extern crate test;
-extern crate deque;
 extern crate mmap;
 
-pub use self::coroutine::Builder;
-pub use self::coroutine::{Coroutine, spawn, sched, current};
+pub use coroutine::Builder;
+pub use coroutine::{Coroutine, spawn, sched, current};
 
 pub mod context;
 pub mod coroutine;
 pub mod stack;
-pub mod processor;
-pub mod sync;
-mod thunk; // use self-maintained thunk, because std::thunk is temporary.
+mod thunk; // use self-maintained thunk, because std::thunk is temporary. May be replaced by FnBox in the future.
 mod sys;
