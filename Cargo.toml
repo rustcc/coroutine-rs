@@ -32,6 +32,10 @@ path = "src/lib.rs"
 
 [dependencies]
 mmap = "*"
+deque = "*"
+
+[dependencies.mio]
+git = "https://github.com/carllerche/mio.git"
 
 [dev-dependencies]
 num_cpus = "*"
