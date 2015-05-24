@@ -160,6 +160,8 @@ impl Handle {
         match self.state() {
             State::Finished | State::Running => return Ok(()),
             State::Panicked => panic!("Trying to resume a panicked coroutine"),
+            State::Normal => panic!("Coroutine {:?} is waiting for its child to return, cannot resume!",
+                                    self.name().unwrap_or("<unnamed>")),
             _ => {}
         }
 
@@ -201,7 +203,7 @@ impl Handle {
     pub fn join(&self) -> ResumeResult<()> {
         loop {
             match self.state() {
-                State::Suspended => try!(self.resume()),
+                State::Suspended | State::Blocked => try!(self.resume()),
                 _ => break,
             }
         }
@@ -332,22 +334,21 @@ impl Coroutine {
 
     /// Spawn a Coroutine with options
     pub fn spawn_opts<F>(f: F, opts: Options) -> Handle
-            where F: FnOnce() + Send + 'static {
+        where F: FnOnce() + Send + 'static
+    {
 
         let env = Environment::current();
         let mut stack = env.stack_pool.take_stack(opts.stack_size);
 
-        let ctx = Context::new(coroutine_initialize,
-                           0,
-                           f,
-                           &mut stack);
+        let ctx = Context::new(coroutine_initialize, 0, f, &mut stack);
 
         Coroutine::new(opts.name, stack, ctx, State::Suspended)
     }
 
     /// Spawn a Coroutine with default options
     pub fn spawn<F>(f: F) -> Handle
-            where F: FnOnce() + Send + 'static {
+        where F: FnOnce() + Send + 'static
+    {
         Coroutine::spawn_opts(f, Default::default())
     }
 
@@ -485,7 +486,8 @@ impl Builder {
 
     /// Spawn a new Coroutine, and return a handle for it.
     pub fn spawn<F>(self, f: F) -> Handle
-            where F: FnOnce() + Send + 'static {
+        where F: FnOnce() + Send + 'static
+    {
         Coroutine::spawn_opts(f, self.opts)
     }
 }
@@ -494,7 +496,8 @@ impl Builder {
 ///
 /// Equavalent to `Coroutine::spawn`.
 pub fn spawn<F>(f: F) -> Handle
-        where F: FnOnce() + Send + 'static {
+    where F: FnOnce() + Send + 'static
+{
     Builder::new().spawn(f)
 }
 
