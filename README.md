@@ -1,6 +1,6 @@
 # coroutine-rs
 
-[![Build Status](https://travis-ci.org/rustcc/coroutine-rs.png?branch=master)](https://travis-ci.org/rustcc/coroutine-rs) [![crates.io](https://img.shields.io/crates/v/coroutine.svg)](https://crates.io/crates/coroutine)
+[![Build Status](https://img.shields.io/travis/zonyitoo/coroutine-rs.svg)](https://travis-ci.org/rustcc/coroutine-rs) [![crates.io](https://img.shields.io/crates/v/coroutine.svg)](https://crates.io/crates/coroutine) [![crates.io](https://img.shields.io/crates/l/coroutine.svg)](https://crates.io/crates/coroutine)
 
 Coroutine library in Rust
 
