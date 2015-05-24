@@ -83,7 +83,6 @@ use std::rt::unwind::try;
 use std::any::Any;
 use std::cell::UnsafeCell;
 use std::ops::Deref;
-use std::ptr;
 use std::sync::Arc;
 use std::cell::RefCell;
 
@@ -161,6 +160,8 @@ impl Handle {
         match self.state() {
             State::Finished | State::Running => return Ok(()),
             State::Panicked => panic!("Trying to resume a panicked coroutine"),
+            State::Normal => panic!("Coroutine {:?} is waiting for its child to return, cannot resume!",
+                                    self.name().unwrap_or("<unnamed>")),
             _ => {}
         }
 
@@ -174,13 +175,11 @@ impl Handle {
 
             // Save state
             to_coro.set_state(State::Running);
-            to_coro.parent = from_coro;
             from_coro.set_state(State::Normal);
 
-            env.current_running = self.clone();
+            env.coroutine_stack.push(self.clone());
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
         }
-        env.current_running = from_coro_hdl;
 
         match env.running_state.take() {
             Some(err) => Err(err),
@@ -204,7 +203,7 @@ impl Handle {
     pub fn join(&self) -> ResumeResult<()> {
         loop {
             match self.state() {
-                State::Suspended => try!(self.resume()),
+                State::Suspended | State::Blocked => try!(self.resume()),
                 _ => break,
             }
         }
@@ -245,9 +244,6 @@ pub struct Coroutine {
     /// Always valid if the task is alive and not running.
     saved_context: Context,
 
-    /// Parent coroutine, will always be valid
-    parent: *mut Coroutine,
-
     /// State
     state: State,
 
@@ -279,7 +275,9 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
 
     let env = Environment::current();
 
-    let cur: &mut Coroutine = unsafe { env.current_running.get_inner_mut() };
+    let cur: &mut Coroutine = unsafe {
+        env.coroutine_stack.last().expect("Impossible happened! No current coroutine!").get_inner_mut()
+    };
 
     let state = match ret {
         Ok(..) => {
@@ -320,7 +318,6 @@ impl Coroutine {
         Handle::new(Coroutine {
             current_stack_segment: None,
             saved_context: Context::empty(),
-            parent: ptr::null_mut(),
             state: state,
             name: name,
         })
@@ -330,7 +327,6 @@ impl Coroutine {
         Handle::new(Coroutine {
             current_stack_segment: Some(stack),
             saved_context: ctx,
-            parent: ptr::null_mut(),
             state: state,
             name: name,
         })
@@ -338,22 +334,21 @@ impl Coroutine {
 
     /// Spawn a Coroutine with options
     pub fn spawn_opts<F>(f: F, opts: Options) -> Handle
-            where F: FnOnce() + Send + 'static {
+        where F: FnOnce() + Send + 'static
+    {
 
         let env = Environment::current();
         let mut stack = env.stack_pool.take_stack(opts.stack_size);
 
-        let ctx = Context::new(coroutine_initialize,
-                           0,
-                           f,
-                           &mut stack);
+        let ctx = Context::new(coroutine_initialize, 0, f, &mut stack);
 
         Coroutine::new(opts.name, stack, ctx, State::Suspended)
     }
 
     /// Spawn a Coroutine with default options
     pub fn spawn<F>(f: F) -> Handle
-            where F: FnOnce() + Send + 'static {
+        where F: FnOnce() + Send + 'static
+    {
         Coroutine::spawn_opts(f, Default::default())
     }
 
@@ -364,12 +359,19 @@ impl Coroutine {
         assert!(state != State::Running);
 
         let env = Environment::current();
-        unsafe {
-            let from_coro = env.current_running.get_inner_mut();
-            from_coro.set_state(state);
+        if env.coroutine_stack.len() == 1 {
+            // Environment root
+            return;
+        }
 
-            let to_coro: &mut Coroutine = &mut *from_coro.parent;
-            Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
+        unsafe {
+            match (env.coroutine_stack.pop(), env.coroutine_stack.last()) {
+                (Some(from_coro), Some(to_coro)) => {
+                    from_coro.set_state(state);
+                    Context::swap(&mut from_coro.get_inner_mut().saved_context, &to_coro.saved_context);
+                },
+                _ => unreachable!()
+            }
         }
     }
 
@@ -391,7 +393,8 @@ impl Coroutine {
     /// in more than one native thread.
     #[inline]
     pub fn current() -> Handle {
-        Environment::current().current_running.clone()
+        Environment::current().coroutine_stack.last().map(|hdl| hdl.clone())
+            .expect("Impossible happened! No current coroutine!")
     }
 
     #[inline(always)]
@@ -418,8 +421,7 @@ thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Environment> = UnsafeCell
 struct Environment {
     stack_pool: StackPool,
 
-    current_running: Handle,
-    __main_coroutine: Handle,
+    coroutine_stack: Vec<Handle>,
 
     running_state: Option<Box<Any + Send>>,
 }
@@ -427,16 +429,16 @@ struct Environment {
 impl Environment {
     /// Initialize a new environment
     fn new() -> Environment {
-        let coro = unsafe {
+        let st = unsafe {
+            let mut st = Vec::new();
             let coro = Coroutine::empty(Some("<Environment Root Coroutine>".to_string()), State::Running);
-            coro.0.borrow_mut().parent = coro.get_inner_mut(); // Point to itself
-            coro
+            st.push(coro);
+            st
         };
 
         Environment {
             stack_pool: StackPool::new(),
-            current_running: coro.clone(),
-            __main_coroutine: coro,
+            coroutine_stack: st,
 
             running_state: None,
         }
@@ -484,7 +486,8 @@ impl Builder {
 
     /// Spawn a new Coroutine, and return a handle for it.
     pub fn spawn<F>(self, f: F) -> Handle
-            where F: FnOnce() + Send + 'static {
+        where F: FnOnce() + Send + 'static
+    {
         Coroutine::spawn_opts(f, self.opts)
     }
 }
@@ -493,7 +496,8 @@ impl Builder {
 ///
 /// Equavalent to `Coroutine::spawn`.
 pub fn spawn<F>(f: F) -> Handle
-        where F: FnOnce() + Send + 'static {
+    where F: FnOnce() + Send + 'static
+{
     Builder::new().spawn(f)
 }
 
