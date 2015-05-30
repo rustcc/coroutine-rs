@@ -637,9 +637,9 @@ mod bench {
     use super::Coroutine;
 
     #[bench]
-    fn bench_coroutine_spawning_with_recycle(b: &mut Bencher) {
+    fn bench_coroutine_spawning(b: &mut Bencher) {
         b.iter(|| {
-            let _ = Coroutine::spawn(move|| {}).join();
+            let _ = Coroutine::spawn(move|| {});
         });
     }
 
@@ -679,6 +679,23 @@ mod bench {
                 result += n;
             }
             assert_eq!(result, MAX_NUMBER);
+        });
+    }
+
+    #[bench]
+    fn bench_context_switch(b: &mut Bencher) {
+        let coro = Coroutine::spawn(|| {
+            loop {
+                // 3. Save current context
+                // 4. Switch
+                Coroutine::sched();
+            }
+        });
+
+        b.iter(|| {
+            // 1. Save current context
+            // 2. Switch
+            let _ = coro.resume();
         });
     }
 }
