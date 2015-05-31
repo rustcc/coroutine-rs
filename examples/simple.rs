@@ -1,32 +1,40 @@
 extern crate coroutine;
 
-use coroutine::{spawn, sched};
+use coroutine::Coroutine;
 
 fn main() {
     // Spawn a new coroutine
-    let coro = spawn(move|| {
+    let coro = Coroutine::spawn(move|| {
 
-        println!("Hello in coroutine!");
+        println!("1. Hello in coroutine!");
 
         // Yield back to it's parent
-        sched();
+        Coroutine::sched();
 
-        println!("We are back!!");
+        println!("3. We are back!!");
 
         // Spawn a new coroutine
-        spawn(move|| {
-            println!("Hello inside");
+        Coroutine::spawn(move|| {
+            println!("4. Begin counting ...");
+            for i in 0..5 {
+                println!("Counting {}", i);
+
+                // Yield to it's parent
+                Coroutine::sched();
+            }
+            println!("5. Counting finished");
         }).join().ok().expect("Failed to join");
 
-        println!("Good bye");
+        println!("6. Good bye");
     });
 
+    // Resume `coro`
     coro.resume().ok().expect("Failed to resume");
 
-    println!("We are here!");
+    println!("2. We are here!");
 
     // Resume the coroutine
     coro.resume().ok().expect("Failed to resume");
 
-    println!("Back to main.");
+    println!("7. Back to main.");
 }
