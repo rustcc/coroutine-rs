@@ -1,4 +1,6 @@
 language: rust
+rust: nightly
+
 os:
     - linux
     - osx
@@ -6,4 +8,4 @@ script:
   - cargo build -v
   - cargo test -v
   - cargo run --example simple
-  - cargo doc --no-deps 
+  - cargo doc --no-deps
