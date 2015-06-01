@@ -630,8 +630,6 @@ mod test {
 
 #[cfg(test)]
 mod bench {
-    use std::sync::mpsc::channel;
-
     use test::Bencher;
 
     use super::Coroutine;
@@ -640,45 +638,6 @@ mod bench {
     fn bench_coroutine_spawning(b: &mut Bencher) {
         b.iter(|| {
             let _ = Coroutine::spawn(move|| {});
-        });
-    }
-
-    #[bench]
-    fn bench_normal_counting(b: &mut Bencher) {
-        b.iter(|| {
-            const MAX_NUMBER: usize = 100;
-
-            let (tx, rx) = channel();
-
-            let mut result = 0;
-            for _ in 0..MAX_NUMBER {
-                tx.send(1).unwrap();
-                result += rx.recv().unwrap();
-            }
-            assert_eq!(result, MAX_NUMBER);
-        });
-    }
-
-    #[bench]
-    fn bench_coroutine_counting(b: &mut Bencher) {
-        b.iter(|| {
-            const MAX_NUMBER: usize = 100;
-            let (tx, rx) = channel();
-
-            let coro = Coroutine::spawn(move|| {
-                for _ in 0..MAX_NUMBER {
-                    tx.send(1).unwrap();
-                    Coroutine::sched();
-                }
-            });
-            coro.resume().ok().expect("Failed to resume");
-
-            let mut result = 0;
-            for n in rx.iter() {
-                coro.resume().ok().expect("Failed to resume");
-                result += n;
-            }
-            assert_eq!(result, MAX_NUMBER);
         });
     }
 
