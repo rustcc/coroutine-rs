@@ -139,6 +139,15 @@ pub struct Handle(Unique<Coroutine>);
 
 unsafe impl Send for Handle {}
 
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe {
+            let p = Box::from_raw(*self.0);
+            drop(p);
+        }
+    }
+}
+
 impl Handle {
     fn new(c: Coroutine) -> Handle {
         unsafe {
@@ -151,7 +160,7 @@ impl Handle {
     }
 
     unsafe fn get_inner(&self) -> &Coroutine {
-        self.0.get()
+        & *self.0.get()
     }
 
     /// Resume the Coroutine
