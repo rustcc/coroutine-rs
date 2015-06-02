@@ -14,6 +14,15 @@ homepage = "https://github.com/rustcc/coroutine-rs"
 build = "build.rs"
 keywords = ["coroutine", "green", "thread", "fiber"]
 
+[features]
+default = [
+    #"enable-locked-state",
+]
+
+enable-locked-state = [
+    "spinlock"
+]
+
 [build-dependencies]
 gcc = "*"
 log = "*"
@@ -24,6 +33,11 @@ path = "src/lib.rs"
 
 [dependencies]
 mmap = "*"
+#spinlocks = "*"
+
+[dependencies.spinlock]
+git = "https://github.com/zonyitoo/spinlock.rs.git"
+optional = true
 
 [dev-dependencies]
 num_cpus = "*"

@@ -14,17 +14,30 @@
 
 #![feature(std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size)]
 #![feature(rustc_private)]
+#![feature(unique)]
 
 #[macro_use] extern crate log;
 extern crate libc;
 extern crate test;
 extern crate mmap;
+#[cfg(feature = "enable-locked-state")]
+extern crate spinlock;
+
+#[cfg(feature = "enable-locked-state")]
+pub use coroutine_clonable as coroutine;
+
+#[cfg(not(feature = "enable-locked-state"))]
+pub use coroutine_unique as coroutine;
 
 pub use coroutine::Builder;
-pub use coroutine::{Coroutine, spawn, sched, current};
+pub use coroutine::{Coroutine, spawn, sched};
 
 pub mod context;
-pub mod coroutine;
+#[cfg(feature = "enable-locked-state")]
+pub mod coroutine_clonable;
+#[cfg(not(feature = "enable-locked-state"))]
+pub mod coroutine_unique;
+
 pub mod stack;
 mod thunk; // use self-maintained thunk, because std::thunk is temporary. May be replaced by FnBox in the future.
 mod sys;
