@@ -86,7 +86,9 @@ Counting 4
 
 - [x] Clonable coroutine handle
 
-- [ ] Thread-safe: can only resume a coroutine in one thread simultaneously
+- [x] Unique coroutine handle (for special usage)
+
+- [x] Thread-safe: can only resume a coroutine in one thread simultaneously
 
 - [ ] Multithreaded scheduler with work stealing feature
 
@@ -98,6 +100,6 @@ Counting 4
 
 * Basically it supports arm, i686, mips, mipsel and x86_64 platforms, but we have only tested in
 
-    - OS X 10.10.*, x86_64
+    - OS X 10.10.*, x86_64, nightly
 
-    - ArchLinux, x86_64
+    - ArchLinux, x86_64, nightly
