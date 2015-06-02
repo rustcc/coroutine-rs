@@ -140,7 +140,6 @@ impl Default for Options {
 pub struct Handle(Arc<RefCell<Coroutine>>);
 
 unsafe impl Send for Handle {}
-unsafe impl Sync for Handle {}
 
 impl Handle {
     fn new(c: Coroutine) -> Handle {
@@ -252,7 +251,6 @@ pub struct Coroutine {
 }
 
 unsafe impl Send for Coroutine {}
-unsafe impl Sync for Coroutine {}
 
 /// Destroy coroutine and try to reuse std::stack segment.
 impl Drop for Coroutine {
