@@ -45,9 +45,9 @@ impl fmt::Debug for Stack {
 static STACK_FLAGS: libc::c_int = libc::MAP_STACK | libc::MAP_PRIVATE | libc::MAP_ANON;
 #[cfg(any(target_os = "freebsd",
           target_os = "dragonfly"))]
-static STACK_FLAGS: libc::c_isize = libc::MAP_PRIVATE | libc::MAP_ANON;
+static STACK_FLAGS: libc::c_int = libc::MAP_PRIVATE | libc::MAP_ANON;
 #[cfg(windows)]
-static STACK_FLAGS: libc::c_isize = 0;
+static STACK_FLAGS: libc::c_int = 0;
 
 impl Stack {
     /// Allocate a new stack of `size`. If size = 0, this will fail. Use
