@@ -86,7 +86,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::fmt::{self, Debug};
 
-use spinlock::SpinLock;
+use spin::Mutex;
 
 use context::Context;
 use stack::{StackPool, Stack};
@@ -166,7 +166,7 @@ impl Handle {
 
     #[inline(always)]
     fn ready_for_resume(&self) -> ResumeResult<()> {
-        let mut self_state = self.state_lock().write().unwrap();
+        let mut self_state = self.state_lock().lock();
 
         match *self_state {
             State::Finished | State::Running => return Ok(()),
@@ -233,17 +233,17 @@ impl Handle {
     /// Get the state of the Coroutine
     #[inline]
     pub fn state(&self) -> State {
-        unsafe { *self.get_inner().state().read().unwrap() }
+        unsafe { *self.get_inner().state().lock() }
     }
 
     /// Set the state of the Coroutine
     #[inline]
     pub fn set_state(&self, state: State) {
-        unsafe { *self.get_inner_mut().state().write().unwrap() = state; }
+        unsafe { *self.get_inner_mut().state().lock() = state; }
     }
 
     #[inline]
-    fn state_lock(&self) -> &SpinLock<State> {
+    fn state_lock(&self) -> &Mutex<State> {
         unsafe {
             self.get_inner().state()
         }
@@ -272,7 +272,7 @@ pub struct Coroutine {
     saved_context: Context,
 
     /// State
-    state: SpinLock<State>,
+    state: Mutex<State>,
 
     /// Name
     name: Option<String>,
@@ -345,7 +345,7 @@ impl Coroutine {
         Handle::new(Coroutine {
             current_stack_segment: None,
             saved_context: Context::empty(),
-            state: SpinLock::new(state),
+            state: Mutex::new(state),
             name: name,
         })
     }
@@ -354,7 +354,7 @@ impl Coroutine {
         Handle::new(Coroutine {
             current_stack_segment: Some(stack),
             saved_context: ctx,
-            state: SpinLock::new(state),
+            state: Mutex::new(state),
             name: name,
         })
     }
@@ -425,7 +425,7 @@ impl Coroutine {
     }
 
     #[inline(always)]
-    fn state(&self) -> &SpinLock<State> {
+    fn state(&self) -> &Mutex<State> {
         &self.state
     }
 

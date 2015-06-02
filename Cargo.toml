@@ -16,11 +16,11 @@ keywords = ["coroutine", "green", "thread", "fiber"]
 
 [features]
 default = [
-    #"enable-locked-state",
+    "enable-locked-state",
 ]
 
 enable-locked-state = [
-    "spinlock"
+    "spin"
 ]
 
 [build-dependencies]
@@ -33,10 +33,9 @@ path = "src/lib.rs"
 
 [dependencies]
 mmap = "*"
-#spinlocks = "*"
 
-[dependencies.spinlock]
-git = "https://github.com/zonyitoo/spinlock.rs.git"
+[dependencies.spin]
+version = "*"
 optional = true
 
 [dev-dependencies]

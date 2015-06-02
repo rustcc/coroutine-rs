@@ -12,6 +12,7 @@
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
+#![allow(unused_features)]
 #![feature(std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size)]
 #![feature(rustc_private)]
 #![feature(unique)]
@@ -21,7 +22,7 @@ extern crate libc;
 extern crate test;
 extern crate mmap;
 #[cfg(feature = "enable-locked-state")]
-extern crate spinlock;
+extern crate spin;
 
 #[cfg(feature = "enable-locked-state")]
 pub use coroutine_clonable as coroutine;
