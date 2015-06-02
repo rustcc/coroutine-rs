@@ -80,6 +80,7 @@ impl Stack {
     }
 
     /// Create a 0-length stack which starts (and ends) at 0.
+    #[allow(dead_code)]
     pub unsafe fn dummy_stack() -> Stack {
         Stack {
             buf: None,
@@ -87,6 +88,7 @@ impl Stack {
         }
     }
 
+    #[allow(dead_code)]
     pub fn guard(&self) -> *const usize {
         (self.start() as usize + page_size()) as *const usize
     }

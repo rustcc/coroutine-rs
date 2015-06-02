@@ -150,6 +150,7 @@ impl Debug for Handle {
 }
 
 unsafe impl Send for Handle {}
+unsafe impl Sync for Handle {}
 
 impl Handle {
     fn new(c: Coroutine) -> Handle {
@@ -164,26 +165,21 @@ impl Handle {
         &*self.0.get()
     }
 
-    #[inline(always)]
-    fn ready_for_resume(&self) -> ResumeResult<()> {
-        let mut self_state = self.state_lock().lock();
-
-        match *self_state {
-            State::Finished | State::Running => return Ok(()),
-            State::Panicked => panic!("Trying to resume a panicked coroutine"),
-            State::Normal => panic!("Coroutine {:?} is waiting for its child to return, cannot resume!",
-                                    self.name().unwrap_or("<unnamed>")),
-            _ => {}
-        }
-
-        *self_state = State::Running;
-
-        Ok(())
-    }
-
     /// Resume the Coroutine
     pub fn resume(&self) -> ResumeResult<()> {
-        try!(self.ready_for_resume());
+        {
+            let mut self_state = self.state_lock().lock();
+
+            match *self_state {
+                State::Finished | State::Running => return Ok(()),
+                State::Panicked => panic!("Trying to resume a panicked coroutine"),
+                State::Normal => panic!("Coroutine {:?} is waiting for its child to return, cannot resume!",
+                                        self.name().unwrap_or("<unnamed>")),
+                _ => {}
+            }
+
+            *self_state = State::Running;
+        }
 
         let env = Environment::current();
 
@@ -194,7 +190,6 @@ impl Handle {
             };
 
             // Save state
-            // self.set_state(State::Running);
             from_coro_hdl.set_state(State::Normal);
 
             env.coroutine_stack.push(unsafe { transmute(self) });
@@ -213,7 +208,7 @@ impl Handle {
     ///
     /// ```ignore
     /// // Wait until the Coroutine exits
-    /// spawn(|| {
+    /// Coroutine::spawn(|| {
     ///     println!("Before yield");
     ///     sched();
     ///     println!("Exiting");
@@ -260,7 +255,6 @@ impl Deref for Handle {
 }
 
 /// A coroutine is nothing more than a (register context, stack) pair.
-// #[allow(raw_pointer_derive)]
 // #[derive(Debug)]
 pub struct Coroutine {
     /// The segment of stack on which the task is currently running or

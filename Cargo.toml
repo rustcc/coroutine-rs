@@ -16,10 +16,10 @@ keywords = ["coroutine", "green", "thread", "fiber"]
 
 [features]
 default = [
-    "enable-locked-state",
+    "enable-clonable-handle",
 ]
 
-enable-locked-state = [
+enable-clonable-handle = [
     "spin"
 ]
 
