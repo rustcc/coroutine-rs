@@ -169,15 +169,15 @@ impl Handle {
 
         let from_coro_hdl = Coroutine::current();
         {
-            let from_coro: &mut Coroutine = unsafe { from_coro_hdl.get_inner_mut() };
-
-            let to_coro: &mut Coroutine = unsafe { self.get_inner_mut() };
+            let (from_coro, to_coro) = unsafe {
+                (from_coro_hdl.get_inner_mut(), self.get_inner_mut())
+            };
 
             // Save state
             to_coro.set_state(State::Running);
             from_coro.set_state(State::Normal);
 
-            env.coroutine_stack.push(self.clone());
+            env.coroutine_stack.push(unsafe { transmute(self) });
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
         }
 
@@ -276,7 +276,8 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
     let env = Environment::current();
 
     let cur: &mut Coroutine = unsafe {
-        env.coroutine_stack.last().expect("Impossible happened! No current coroutine!").get_inner_mut()
+        let last = & **env.coroutine_stack.last().expect("Impossible happened! No current coroutine!");
+        last.get_inner_mut()
     };
 
     let state = match ret {
@@ -367,8 +368,8 @@ impl Coroutine {
         unsafe {
             match (env.coroutine_stack.pop(), env.coroutine_stack.last()) {
                 (Some(from_coro), Some(to_coro)) => {
-                    from_coro.set_state(state);
-                    Context::swap(&mut from_coro.get_inner_mut().saved_context, &to_coro.saved_context);
+                    (&mut *from_coro).set_state(state);
+                    Context::swap(&mut (& *from_coro).get_inner_mut().saved_context, &(& **to_coro).saved_context);
                 },
                 _ => unreachable!()
             }
@@ -392,8 +393,8 @@ impl Coroutine {
     /// It is unsafe because it is an undefined behavior if you resume a Coroutine
     /// in more than one native thread.
     #[inline]
-    pub fn current() -> Handle {
-        Environment::current().coroutine_stack.last().map(|hdl| hdl.clone())
+    pub fn current() -> &'static Handle {
+        Environment::current().coroutine_stack.last().map(|hdl| unsafe { (& **hdl) })
             .expect("Impossible happened! No current coroutine!")
     }
 
@@ -414,34 +415,40 @@ impl Coroutine {
     }
 }
 
-thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Environment> = UnsafeCell::new(Environment::new()));
+thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Box<Environment>> = UnsafeCell::new(Environment::new()));
 
 /// Coroutine managing environment
 #[allow(raw_pointer_derive)]
 struct Environment {
     stack_pool: StackPool,
 
-    coroutine_stack: Vec<Handle>,
+    coroutine_stack: Vec<*mut Handle>,
+    _main_coroutine: Handle,
 
     running_state: Option<Box<Any + Send>>,
 }
 
 impl Environment {
     /// Initialize a new environment
-    fn new() -> Environment {
-        let st = unsafe {
-            let mut st = Vec::new();
+    fn new() -> Box<Environment> {
+        let coro = unsafe {
             let coro = Coroutine::empty(Some("<Environment Root Coroutine>".to_string()), State::Running);
-            st.push(coro);
-            st
+            coro
         };
 
-        Environment {
+        let mut env = Box::new(Environment {
             stack_pool: StackPool::new(),
-            coroutine_stack: st,
+
+            coroutine_stack: Vec::new(),
+            _main_coroutine: coro,
 
             running_state: None,
-        }
+        });
+
+        let coro: *mut Handle = &mut env._main_coroutine;
+        env.coroutine_stack.push(coro);
+
+        env
     }
 
     fn current() -> &'static mut Environment {
@@ -504,7 +511,7 @@ pub fn spawn<F>(f: F) -> Handle
 /// Get the current Coroutine
 ///
 /// Equavalent to `Coroutine::current`.
-pub fn current() -> Handle {
+pub fn current() -> &'static Handle {
     Coroutine::current()
 }
 
