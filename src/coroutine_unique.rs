@@ -85,6 +85,7 @@ use std::cell::UnsafeCell;
 use std::ops::Deref;
 use std::ptr::Unique;
 use std::fmt::{self, Debug};
+use std::boxed;
 
 use context::Context;
 use stack::{StackPool, Stack};
@@ -160,7 +161,7 @@ impl Drop for Handle {
 impl Handle {
     fn new(c: Coroutine) -> Handle {
         unsafe {
-            Handle(Unique::new(transmute(Box::new(c))))
+            Handle(Unique::new(boxed::into_raw(Box::new(c))))
         }
     }
 

@@ -194,6 +194,9 @@ impl Handle {
 
             env.coroutine_stack.push(unsafe { transmute(self) });
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
+
+            from_coro_hdl.set_state(State::Running);
+            self.set_state(env.switch_state);
         }
 
         match env.running_state.take() {
@@ -219,6 +222,7 @@ impl Handle {
         loop {
             match self.state() {
                 State::Finished | State::Panicked => break,
+                State::Running => {},
                 _ => try!(self.resume()),
             }
         }
@@ -228,15 +232,13 @@ impl Handle {
     /// Get the state of the Coroutine
     #[inline]
     pub fn state(&self) -> State {
-        unsafe { *self.get_inner().state().lock() }
+        *self.state_lock().lock()
     }
 
     /// Set the state of the Coroutine
     #[inline]
     fn set_state(&self, state: State) {
-        unsafe {
-            *self.get_inner_mut().state().lock() = state;
-        }
+        *self.state_lock().lock() = state;
     }
 
     #[inline]
@@ -390,7 +392,8 @@ impl Coroutine {
         unsafe {
             match (env.coroutine_stack.pop(), env.coroutine_stack.last()) {
                 (Some(from_coro), Some(to_coro)) => {
-                    (&mut *from_coro).set_state(state);
+                    // (&mut *from_coro).set_state(state);
+                    env.switch_state = state;
                     Context::swap(&mut (& *from_coro).get_inner_mut().saved_context, &(& **to_coro).saved_context);
                 },
                 _ => unreachable!()
@@ -455,6 +458,7 @@ struct Environment {
     _main_coroutine: Handle,
 
     running_state: Option<Box<Any + Send>>,
+    switch_state: State,
 }
 
 impl Environment {
@@ -472,6 +476,7 @@ impl Environment {
             _main_coroutine: coro,
 
             running_state: None,
+            switch_state: State::Suspended,
         });
 
         let coro: *mut Handle = &mut env._main_coroutine;
