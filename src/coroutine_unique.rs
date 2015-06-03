@@ -137,6 +137,14 @@ impl Default for Options {
 /// Handle of a Coroutine
 pub struct Handle(Unique<Coroutine>);
 
+impl Debug for Handle {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        unsafe {
+            self.get_inner().name().fmt(f)
+        }
+    }
+}
+
 unsafe impl Send for Handle {}
 
 impl Drop for Handle {
@@ -211,8 +219,8 @@ impl Handle {
     pub fn join(&self) -> ResumeResult<()> {
         loop {
             match self.state() {
-                State::Suspended | State::Blocked => try!(self.resume()),
-                _ => break,
+                State::Finished | State::Panicked => break,
+                _ => try!(self.resume()),
             }
         }
         Ok(())
@@ -221,12 +229,14 @@ impl Handle {
     /// Get the state of the Coroutine
     #[inline]
     pub fn state(&self) -> State {
-        unsafe { self.get_inner().state() }
+        unsafe {
+            self.get_inner().state()
+        }
     }
 
     /// Set the state of the Coroutine
     #[inline]
-    pub fn set_state(&self, state: State) {
+    fn set_state(&self, state: State) {
         unsafe { self.get_inner_mut().set_state(state) }
     }
 }
@@ -419,6 +429,18 @@ impl Coroutine {
     #[inline(always)]
     pub fn name(&self) -> Option<&str> {
         self.name.as_ref().map(|s| &**s)
+    }
+
+    /// Determines whether the current Coroutine is unwinding because of panic.
+    #[inline(always)]
+    pub fn panicking(&self) -> bool {
+        self.state() == State::Panicked
+    }
+
+    /// Determines whether the Coroutine is finished
+    #[inline(always)]
+    pub fn finished(&self) -> bool {
+        self.state() == State::Finished
     }
 }
 

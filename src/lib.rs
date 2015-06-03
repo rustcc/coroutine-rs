@@ -31,7 +31,7 @@ pub use coroutine_clonable as coroutine;
 pub use coroutine_unique as coroutine;
 
 pub use coroutine::Builder;
-pub use coroutine::{Coroutine, spawn, sched, current};
+pub use coroutine::{Coroutine, Handle, spawn, sched, current};
 
 mod context;
 #[cfg(feature = "enable-clonable-handle")]

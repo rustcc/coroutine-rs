@@ -218,8 +218,8 @@ impl Handle {
     pub fn join(&self) -> ResumeResult<()> {
         loop {
             match self.state() {
-                State::Suspended | State::Blocked => try!(self.resume()),
-                _ => break,
+                State::Finished | State::Panicked => break,
+                _ => try!(self.resume()),
             }
         }
         Ok(())
@@ -233,8 +233,10 @@ impl Handle {
 
     /// Set the state of the Coroutine
     #[inline]
-    pub fn set_state(&self, state: State) {
-        unsafe { *self.get_inner_mut().state().lock() = state; }
+    fn set_state(&self, state: State) {
+        unsafe {
+            *self.get_inner_mut().state().lock() = state;
+        }
     }
 
     #[inline]
@@ -427,6 +429,18 @@ impl Coroutine {
     #[inline(always)]
     pub fn name(&self) -> Option<&str> {
         self.name.as_ref().map(|s| &**s)
+    }
+
+    /// Determines whether the current Coroutine is unwinding because of panic.
+    #[inline(always)]
+    pub fn panicking(&self) -> bool {
+        *self.state().lock() == State::Panicked
+    }
+
+    /// Determines whether the Coroutine is finished
+    #[inline(always)]
+    pub fn finished(&self) -> bool {
+        *self.state().lock() == State::Finished
     }
 }
 
