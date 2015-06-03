@@ -197,6 +197,8 @@ impl Handle {
 
             env.coroutine_stack.push(unsafe { transmute(self) });
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
+
+            from_coro.set_state(State::Running);
         }
 
         match env.running_state.take() {

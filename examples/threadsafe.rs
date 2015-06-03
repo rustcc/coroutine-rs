@@ -11,10 +11,10 @@ fn main() {
 
     let coro =
         Coroutine::spawn(move|| {
-            for count in 0..100000 {
-                println!("Coroutine running in thread {:?}: counting {}", thread::current(), count);
+            for _ in 0..100000 {
                 Coroutine::sched();
             }
+            println!("Finished");
         });
 
     for i in 0..num_cpus::get() {
