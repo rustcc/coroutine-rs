@@ -83,8 +83,9 @@ use std::rt::unwind::try;
 use std::any::Any;
 use std::cell::UnsafeCell;
 use std::ops::Deref;
-use std::sync::Arc;
-use std::cell::RefCell;
+use std::ptr::Unique;
+use std::fmt::{self, Debug};
+use std::boxed;
 
 use context::Context;
 use stack::{StackPool, Stack};
@@ -136,23 +137,40 @@ impl Default for Options {
 }
 
 /// Handle of a Coroutine
-#[derive(Debug, Clone)]
-pub struct Handle(Arc<RefCell<Coroutine>>);
+pub struct Handle(Unique<Coroutine>);
+
+impl Debug for Handle {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        unsafe {
+            self.get_inner().name().fmt(f)
+        }
+    }
+}
 
 unsafe impl Send for Handle {}
-unsafe impl Sync for Handle {}
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe {
+            let p = Box::from_raw(*self.0);
+            drop(p);
+        }
+    }
+}
 
 impl Handle {
     fn new(c: Coroutine) -> Handle {
-        Handle(Arc::new(RefCell::new(c)))
+        unsafe {
+            Handle(Unique::new(boxed::into_raw(Box::new(c))))
+        }
     }
 
     unsafe fn get_inner_mut(&self) -> &mut Coroutine {
-        &mut *self.0.as_unsafe_cell().get()
+        &mut **self.0
     }
 
     unsafe fn get_inner(&self) -> &Coroutine {
-        &*self.0.as_unsafe_cell().get()
+        & *self.0.get()
     }
 
     /// Resume the Coroutine
@@ -169,16 +187,18 @@ impl Handle {
 
         let from_coro_hdl = Coroutine::current();
         {
-            let from_coro: &mut Coroutine = unsafe { from_coro_hdl.get_inner_mut() };
-
-            let to_coro: &mut Coroutine = unsafe { self.get_inner_mut() };
+            let (from_coro, to_coro) = unsafe {
+                (from_coro_hdl.get_inner_mut(), self.get_inner_mut())
+            };
 
             // Save state
             to_coro.set_state(State::Running);
             from_coro.set_state(State::Normal);
 
-            env.coroutine_stack.push(self.clone());
+            env.coroutine_stack.push(unsafe { transmute(self) });
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
+
+            from_coro.set_state(State::Running);
         }
 
         match env.running_state.take() {
@@ -203,8 +223,8 @@ impl Handle {
     pub fn join(&self) -> ResumeResult<()> {
         loop {
             match self.state() {
-                State::Suspended | State::Blocked => try!(self.resume()),
-                _ => break,
+                State::Finished | State::Panicked => break,
+                _ => try!(self.resume()),
             }
         }
         Ok(())
@@ -213,12 +233,14 @@ impl Handle {
     /// Get the state of the Coroutine
     #[inline]
     pub fn state(&self) -> State {
-        unsafe { self.get_inner().state() }
+        unsafe {
+            self.get_inner().state()
+        }
     }
 
     /// Set the state of the Coroutine
     #[inline]
-    pub fn set_state(&self, state: State) {
+    fn set_state(&self, state: State) {
         unsafe { self.get_inner_mut().set_state(state) }
     }
 }
@@ -252,7 +274,6 @@ pub struct Coroutine {
 }
 
 unsafe impl Send for Coroutine {}
-unsafe impl Sync for Coroutine {}
 
 /// Destroy coroutine and try to reuse std::stack segment.
 impl Drop for Coroutine {
@@ -276,7 +297,8 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
     let env = Environment::current();
 
     let cur: &mut Coroutine = unsafe {
-        env.coroutine_stack.last().expect("Impossible happened! No current coroutine!").get_inner_mut()
+        let last = & **env.coroutine_stack.last().expect("Impossible happened! No current coroutine!");
+        last.get_inner_mut()
     };
 
     let state = match ret {
@@ -367,8 +389,8 @@ impl Coroutine {
         unsafe {
             match (env.coroutine_stack.pop(), env.coroutine_stack.last()) {
                 (Some(from_coro), Some(to_coro)) => {
-                    from_coro.set_state(state);
-                    Context::swap(&mut from_coro.get_inner_mut().saved_context, &to_coro.saved_context);
+                    (&mut *from_coro).set_state(state);
+                    Context::swap(&mut (& *from_coro).get_inner_mut().saved_context, &(& **to_coro).saved_context);
                 },
                 _ => unreachable!()
             }
@@ -392,8 +414,8 @@ impl Coroutine {
     /// It is unsafe because it is an undefined behavior if you resume a Coroutine
     /// in more than one native thread.
     #[inline]
-    pub fn current() -> Handle {
-        Environment::current().coroutine_stack.last().map(|hdl| hdl.clone())
+    pub fn current() -> &'static Handle {
+        Environment::current().coroutine_stack.last().map(|hdl| unsafe { (& **hdl) })
             .expect("Impossible happened! No current coroutine!")
     }
 
@@ -412,290 +434,59 @@ impl Coroutine {
     pub fn name(&self) -> Option<&str> {
         self.name.as_ref().map(|s| &**s)
     }
+
+    /// Determines whether the current Coroutine is unwinding because of panic.
+    #[inline(always)]
+    pub fn panicking(&self) -> bool {
+        self.state() == State::Panicked
+    }
+
+    /// Determines whether the Coroutine is finished
+    #[inline(always)]
+    pub fn finished(&self) -> bool {
+        self.state() == State::Finished
+    }
 }
 
-thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Environment> = UnsafeCell::new(Environment::new()));
+thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Box<Environment>> = UnsafeCell::new(Environment::new()));
 
 /// Coroutine managing environment
 #[allow(raw_pointer_derive)]
 struct Environment {
     stack_pool: StackPool,
 
-    coroutine_stack: Vec<Handle>,
+    coroutine_stack: Vec<*mut Handle>,
+    _main_coroutine: Handle,
 
     running_state: Option<Box<Any + Send>>,
 }
 
 impl Environment {
     /// Initialize a new environment
-    fn new() -> Environment {
-        let st = unsafe {
-            let mut st = Vec::new();
+    fn new() -> Box<Environment> {
+        let coro = unsafe {
             let coro = Coroutine::empty(Some("<Environment Root Coroutine>".to_string()), State::Running);
-            st.push(coro);
-            st
+            coro
         };
 
-        Environment {
+        let mut env = Box::new(Environment {
             stack_pool: StackPool::new(),
-            coroutine_stack: st,
+
+            coroutine_stack: Vec::new(),
+            _main_coroutine: coro,
 
             running_state: None,
-        }
+        });
+
+        let coro: *mut Handle = &mut env._main_coroutine;
+        env.coroutine_stack.push(coro);
+
+        env
     }
 
     fn current() -> &'static mut Environment {
         COROUTINE_ENVIRONMENT.with(|env| unsafe {
             &mut *env.get()
         })
-    }
-}
-
-/// Coroutine configuration. Provides detailed control over the properties and behavior of new Coroutines.
-///
-/// ```ignore
-/// let coro = Builder::new().name(format!("Coroutine #{}", 1))
-///                          .stack_size(4096)
-///                          .spawn(|| println!("Hello world!!"));
-///
-/// coro.resume().unwrap();
-/// ```
-pub struct Builder {
-    opts: Options,
-}
-
-impl Builder {
-    /// Generate the base configuration for spawning a Coroutine, from which configuration methods can be chained.
-    pub fn new() -> Builder {
-        Builder {
-            opts: Default::default(),
-        }
-    }
-
-    /// Name the Coroutine-to-be. Currently the name is used for identification only in panic messages.
-    pub fn name(mut self, name: String) -> Builder {
-        self.opts.name = Some(name);
-        self
-    }
-
-    /// Set the size of the stack for the new Coroutine.
-    pub fn stack_size(mut self, size: usize) -> Builder {
-        self.opts.stack_size = size;
-        self
-    }
-
-    /// Spawn a new Coroutine, and return a handle for it.
-    pub fn spawn<F>(self, f: F) -> Handle
-        where F: FnOnce() + Send + 'static
-    {
-        Coroutine::spawn_opts(f, self.opts)
-    }
-}
-
-/// Spawn a new Coroutine
-///
-/// Equavalent to `Coroutine::spawn`.
-pub fn spawn<F>(f: F) -> Handle
-    where F: FnOnce() + Send + 'static
-{
-    Builder::new().spawn(f)
-}
-
-/// Get the current Coroutine
-///
-/// Equavalent to `Coroutine::current`.
-pub fn current() -> Handle {
-    Coroutine::current()
-}
-
-/// Resume a Coroutine
-///
-/// Equavalent to `Coroutine::resume`.
-pub fn resume(coro: &Handle) -> ResumeResult<()> {
-    coro.resume()
-}
-
-/// Yield the current Coroutine
-///
-/// Equavalent to `Coroutine::sched`.
-pub fn sched() {
-    Coroutine::sched()
-}
-
-#[cfg(test)]
-mod test {
-    use std::sync::mpsc::channel;
-
-    use super::Coroutine;
-    use super::Builder;
-
-    #[test]
-    fn test_coroutine_basic() {
-        let (tx, rx) = channel();
-        Coroutine::spawn(move|| {
-            tx.send(1).unwrap();
-        }).resume().ok().expect("Failed to resume");
-
-        assert_eq!(rx.recv().unwrap(), 1);
-    }
-
-    #[test]
-    fn test_coroutine_yield() {
-        let (tx, rx) = channel();
-        let coro = Coroutine::spawn(move|| {
-            tx.send(1).unwrap();
-
-            Coroutine::sched();
-
-            tx.send(2).unwrap();
-        });
-        coro.resume().ok().expect("Failed to resume");
-        assert_eq!(rx.recv().unwrap(), 1);
-        assert!(rx.try_recv().is_err());
-
-        coro.resume().ok().expect("Failed to resume");
-
-        assert_eq!(rx.recv().unwrap(), 2);
-    }
-
-    #[test]
-    fn test_coroutine_spawn_inside() {
-        let (tx, rx) = channel();
-        Coroutine::spawn(move|| {
-            tx.send(1).unwrap();
-
-            Coroutine::spawn(move|| {
-                tx.send(2).unwrap();
-            }).join().ok().expect("Failed to join");
-
-        }).join().ok().expect("Failed to join");
-
-        assert_eq!(rx.recv().unwrap(), 1);
-        assert_eq!(rx.recv().unwrap(), 2);
-    }
-
-    #[test]
-    fn test_coroutine_panic() {
-        let coro = Coroutine::spawn(move|| {
-            panic!("Panic inside a coroutine!!");
-        });
-        assert!(coro.join().is_err());
-    }
-
-    #[test]
-    fn test_coroutine_child_panic() {
-        Coroutine::spawn(move|| {
-            let _ = Coroutine::spawn(move|| {
-                panic!("Panic inside a coroutine's child!!");
-            }).join();
-        }).join().ok().expect("Failed to join");
-    }
-
-    #[test]
-    fn test_coroutine_resume_after_finished() {
-        let coro = Coroutine::spawn(move|| {});
-
-        // It is already finished, but we try to resume it
-        // Idealy it would come back immediately
-        assert!(coro.resume().is_ok());
-
-        // Again?
-        assert!(coro.resume().is_ok());
-    }
-
-    #[test]
-    fn test_coroutine_resume_itself() {
-        let coro = Coroutine::spawn(move|| {
-            // Resume itself
-            Coroutine::current().resume().ok().expect("Failed to resume");
-        });
-
-        assert!(coro.resume().is_ok());
-    }
-
-    #[test]
-    fn test_coroutine_yield_in_main() {
-        Coroutine::sched();
-    }
-
-    #[test]
-    fn test_builder_basic() {
-        let (tx, rx) = channel();
-        Builder::new().name("Test builder".to_string()).spawn(move|| {
-            tx.send(1).unwrap();
-        }).join().ok().expect("Failed to join");
-        assert_eq!(rx.recv().unwrap(), 1);
-    }
-}
-
-#[cfg(test)]
-mod bench {
-    use std::sync::mpsc::channel;
-
-    use test::Bencher;
-
-    use super::Coroutine;
-
-    #[bench]
-    fn bench_coroutine_spawning(b: &mut Bencher) {
-        b.iter(|| {
-            let _ = Coroutine::spawn(move|| {});
-        });
-    }
-
-    #[bench]
-    fn bench_normal_counting(b: &mut Bencher) {
-        b.iter(|| {
-            const MAX_NUMBER: usize = 100;
-
-            let (tx, rx) = channel();
-
-            let mut result = 0;
-            for _ in 0..MAX_NUMBER {
-                tx.send(1).unwrap();
-                result += rx.recv().unwrap();
-            }
-            assert_eq!(result, MAX_NUMBER);
-        });
-    }
-
-    #[bench]
-    fn bench_coroutine_counting(b: &mut Bencher) {
-        b.iter(|| {
-            const MAX_NUMBER: usize = 100;
-            let (tx, rx) = channel();
-
-            let coro = Coroutine::spawn(move|| {
-                for _ in 0..MAX_NUMBER {
-                    tx.send(1).unwrap();
-                    Coroutine::sched();
-                }
-            });
-            coro.resume().ok().expect("Failed to resume");
-
-            let mut result = 0;
-            for n in rx.iter() {
-                coro.resume().ok().expect("Failed to resume");
-                result += n;
-            }
-            assert_eq!(result, MAX_NUMBER);
-        });
-    }
-
-    #[bench]
-    fn bench_context_switch(b: &mut Bencher) {
-        let coro = Coroutine::spawn(|| {
-            loop {
-                // 3. Save current context
-                // 4. Switch
-                Coroutine::sched();
-            }
-        });
-
-        b.iter(|| {
-            // 1. Save current context
-            // 2. Switch
-            let _ = coro.resume();
-        });
     }
 }
