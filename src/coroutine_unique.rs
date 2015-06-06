@@ -76,65 +76,19 @@
  */
 
 use std::default::Default;
-use std::rt::util::min_stack;
 use thunk::Thunk;
 use std::mem::transmute;
 use std::rt::unwind::try;
-use std::any::Any;
-use std::cell::UnsafeCell;
 use std::ops::Deref;
 use std::ptr::Unique;
 use std::fmt::{self, Debug};
 use std::boxed;
 
 use context::Context;
-use stack::{StackPool, Stack};
-
-/// State of a Coroutine
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum State {
-    /// Waiting its child to return
-    Normal,
-
-    /// Suspended. Can be waked up by `resume`
-    Suspended,
-
-    /// Blocked. Can be waked up by `resume`
-    Blocked,
-
-    /// Running
-    Running,
-
-    /// Finished
-    Finished,
-
-    /// Panic happened inside, cannot be resumed again
-    Panicked,
-}
-
-/// Return type of resuming.
-///
-/// See `Coroutine::resume` for more detail
-pub type ResumeResult<T> = Result<T, Box<Any + Send>>;
-
-/// Coroutine spawn options
-#[derive(Debug)]
-pub struct Options {
-    /// The size of the stack
-    pub stack_size: usize,
-
-    /// The name of the Coroutine
-    pub name: Option<String>,
-}
-
-impl Default for Options {
-    fn default() -> Options {
-        Options {
-            stack_size: min_stack(),
-            name: None,
-        }
-    }
-}
+use stack::Stack;
+use {State, Result, Error};
+use options::Options;
+use environment::Environment;
 
 /// Handle of a Coroutine
 pub struct Handle(Unique<Coroutine>);
@@ -174,12 +128,12 @@ impl Handle {
     }
 
     /// Resume the Coroutine
-    pub fn resume(&self) -> ResumeResult<()> {
+    pub fn resume(&self) -> Result<()> {
         match self.state() {
-            State::Finished | State::Running => return Ok(()),
-            State::Panicked => panic!("Trying to resume a panicked coroutine"),
-            State::Normal => panic!("Coroutine {:?} is waiting for its child to return, cannot resume!",
-                                    self.name().unwrap_or("<unnamed>")),
+            State::Finished => return Err(Error::Finished),
+            State::Panicked => return Err(Error::Panicked),
+            State::Normal => return Err(Error::Waiting),
+            State::Running => return Ok(()),
             _ => {}
         }
 
@@ -202,7 +156,7 @@ impl Handle {
         }
 
         match env.running_state.take() {
-            Some(err) => Err(err),
+            Some(err) => Err(Error::Panicking(err)),
             None => Ok(()),
         }
     }
@@ -220,11 +174,12 @@ impl Handle {
     /// }).join().unwrap();
     /// ```
     #[inline]
-    pub fn join(&self) -> ResumeResult<()> {
+    pub fn join(&self) -> Result<()> {
         loop {
-            match self.state() {
-                State::Finished | State::Panicked => break,
-                _ => try!(self.resume()),
+            match self.resume() {
+                Ok(..) => {},
+                Err(Error::Finished) => break,
+                Err(err) => return Err(err),
             }
         }
         Ok(())
@@ -336,7 +291,9 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
 }
 
 impl Coroutine {
-    unsafe fn empty(name: Option<String>, state: State) -> Handle {
+
+    #[doc(hidden)]
+    pub unsafe fn empty(name: Option<String>, state: State) -> Handle {
         Handle::new(Coroutine {
             current_stack_segment: None,
             saved_context: Context::empty(),
@@ -345,7 +302,8 @@ impl Coroutine {
         })
     }
 
-    fn new(name: Option<String>, stack: Stack, ctx: Context, state: State) -> Handle {
+    #[doc(hidden)]
+    pub fn new(name: Option<String>, stack: Stack, ctx: Context, state: State) -> Handle {
         Handle::new(Coroutine {
             current_stack_segment: Some(stack),
             saved_context: ctx,
@@ -445,48 +403,5 @@ impl Coroutine {
     #[inline(always)]
     pub fn finished(&self) -> bool {
         self.state() == State::Finished
-    }
-}
-
-thread_local!(static COROUTINE_ENVIRONMENT: UnsafeCell<Box<Environment>> = UnsafeCell::new(Environment::new()));
-
-/// Coroutine managing environment
-#[allow(raw_pointer_derive)]
-struct Environment {
-    stack_pool: StackPool,
-
-    coroutine_stack: Vec<*mut Handle>,
-    _main_coroutine: Handle,
-
-    running_state: Option<Box<Any + Send>>,
-}
-
-impl Environment {
-    /// Initialize a new environment
-    fn new() -> Box<Environment> {
-        let coro = unsafe {
-            let coro = Coroutine::empty(Some("<Environment Root Coroutine>".to_string()), State::Running);
-            coro
-        };
-
-        let mut env = Box::new(Environment {
-            stack_pool: StackPool::new(),
-
-            coroutine_stack: Vec::new(),
-            _main_coroutine: coro,
-
-            running_state: None,
-        });
-
-        let coro: *mut Handle = &mut env._main_coroutine;
-        env.coroutine_stack.push(coro);
-
-        env
-    }
-
-    fn current() -> &'static mut Environment {
-        COROUTINE_ENVIRONMENT.with(|env| unsafe {
-            &mut *env.get()
-        })
     }
 }

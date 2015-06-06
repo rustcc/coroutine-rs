@@ -94,7 +94,7 @@ fn test_coroutine_resume_after_finished() {
     assert!(coro.resume().is_ok());
 
     // Again?
-    assert!(coro.resume().is_ok());
+    assert!(coro.resume().is_err());
 }
 
 #[test]

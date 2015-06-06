@@ -19,7 +19,8 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use coroutine::{Coroutine, Handle, Options};
+use coroutine::{Coroutine, Handle};
+use options::Options;
 
 /// Coroutine configuration. Provides detailed control over the properties and behavior of new Coroutines.
 ///
