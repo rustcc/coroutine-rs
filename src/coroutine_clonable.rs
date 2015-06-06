@@ -163,7 +163,9 @@ impl Handle {
     ///
     /// If the Coroutine panicked, this method will return an `Err` with panic message.
     ///
-    /// ```ignore
+    /// ```
+    /// use coroutine::Coroutine;
+    /// use coroutine::sched;
     /// // Wait until the Coroutine exits
     /// Coroutine::spawn(|| {
     ///     println!("Before yield");
