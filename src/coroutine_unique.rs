@@ -128,12 +128,12 @@ impl Handle {
     }
 
     /// Resume the Coroutine
-    pub fn resume(&self) -> Result<()> {
+    pub fn resume(&self) -> Result {
         match self.state() {
             State::Finished => return Err(Error::Finished),
             State::Panicked => return Err(Error::Panicked),
             State::Normal => return Err(Error::Waiting),
-            State::Running => return Ok(()),
+            State::Running => return Ok(State::Running),
             _ => {}
         }
 
@@ -157,7 +157,7 @@ impl Handle {
 
         match env.running_state.take() {
             Some(err) => Err(Error::Panicking(err)),
-            None => Ok(()),
+            None => Ok(self.state()),
         }
     }
 
@@ -174,15 +174,16 @@ impl Handle {
     /// }).join().unwrap();
     /// ```
     #[inline]
-    pub fn join(&self) -> Result<()> {
+    pub fn join(&self) -> Result {
         loop {
             match self.resume() {
+                Ok(State::Finished) => break,
                 Ok(..) => {},
                 Err(Error::Finished) => break,
                 Err(err) => return Err(err),
             }
         }
-        Ok(())
+        Ok(State::Finished)
     }
 
     /// Get the state of the Coroutine

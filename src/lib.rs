@@ -74,7 +74,7 @@ pub fn current() -> &'static Handle {
 /// Resume a Coroutine
 ///
 /// Equavalent to `Coroutine::resume`.
-pub fn resume(coro: &Handle) -> Result<()> {
+pub fn resume(coro: &Handle) -> Result {
     coro.resume()
 }
 
@@ -114,10 +114,9 @@ pub enum State {
     Panicked,
 }
 
-/// Return type of resuming.
-///
-/// See `Coroutine::resume` for more detail
-pub type Result<T> = ::std::result::Result<T, Error>;
+/// Return type of resuming. Ok if resume successfully with the current state,
+/// Err if resume failed with `Error`.
+pub type Result = ::std::result::Result<State, Error>;
 
 /// Resume Error
 pub enum Error {
