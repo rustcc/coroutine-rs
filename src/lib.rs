@@ -78,11 +78,18 @@ pub fn resume(coro: &Handle) -> Result<()> {
     coro.resume()
 }
 
-/// Yield the current Coroutine
+/// Yield the current Coroutine with `Suspended` state
 ///
 /// Equavalent to `Coroutine::sched`.
 pub fn sched() {
     Coroutine::sched()
+}
+
+/// Yield the current Coroutine with `Blocked` state
+///
+/// Equavalent to `Coroutine::block`.
+pub fn block() {
+    Coroutine::block()
 }
 
 /// State of a Coroutine
@@ -112,10 +119,18 @@ pub enum State {
 /// See `Coroutine::resume` for more detail
 pub type Result<T> = ::std::result::Result<T, Error>;
 
+/// Resume Error
 pub enum Error {
+    /// Coroutine is already finished
     Finished,
+
+    /// Coroutine is waiting for its child to yield (state is Normal)
     Waiting,
+
+    /// Coroutine is panicked
     Panicked,
+
+    /// Coroutine is panicking, carry with the parameter of `panic!()`
     Panicking(Box<Any + Send>),
 }
 

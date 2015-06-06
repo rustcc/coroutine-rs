@@ -349,7 +349,6 @@ impl Coroutine {
         unsafe {
             match (env.coroutine_stack.pop(), env.coroutine_stack.last()) {
                 (Some(from_coro), Some(to_coro)) => {
-                    // (&mut *from_coro).set_state(state);
                     env.switch_state = state;
                     Context::swap(&mut (& *from_coro).get_inner_mut().saved_context, &(& **to_coro).saved_context);
                 },

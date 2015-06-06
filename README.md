@@ -46,18 +46,18 @@ fn main() {
                 Coroutine::sched();
             }
             println!("5. Counting finished");
-        }).join().ok().expect("Failed to join");
+        }).join().unwrap();
 
         println!("6. Good bye");
     });
 
     // Resume `coro`
-    coro.resume().ok().expect("Failed to resume");
+    coro.resume().unwrap();;
 
     println!("2. We are here!");
 
     // Resume the coroutine
-    coro.resume().ok().expect("Failed to resume");
+    coro.resume().unwrap();
 
     println!("7. Back to main.");
 }
