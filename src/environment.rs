@@ -91,25 +91,30 @@ impl Environment {
         env
     }
 
+    #[inline]
     pub fn current() -> &'static mut Environment {
         COROUTINE_ENVIRONMENT.with(|env| unsafe {
             &mut *env.get()
         })
     }
 
+    #[inline]
     pub fn running_count(&self) -> usize {
         self.coroutine_stack.len() - 1
     }
 
+    #[inline]
     pub fn running<'a>(&'a self) -> &'static Handle {
         self.coroutine_stack.last().map(|hdl| unsafe { (& **hdl) })
             .expect("Impossible happened! No current coroutine!")
     }
 
+    #[inline]
     pub fn push(&mut self, hdl: &Handle) {
         self.coroutine_stack.push(unsafe { mem::transmute(hdl) });
     }
 
+    #[inline]
     pub fn pop(&mut self) -> Option<&'static Handle> {
         if self.running_count() == 0 {
             None
@@ -118,28 +123,34 @@ impl Environment {
         }
     }
 
+    #[inline]
     pub fn set_resume_result(&mut self, result: Option<Box<Any + Send>>) {
         self.running_state = result;
     }
 
+    #[inline]
     #[cfg(feature = "enable-clonable-handle")]
     pub fn set_switch_state(&mut self, state: State) {
         self.switch_state = state;
     }
 
+    #[inline]
     pub fn take_last_resume_result(&mut self) -> Option<Box<Any + Send>> {
         self.running_state.take()
     }
 
+    #[inline]
     #[cfg(feature = "enable-clonable-handle")]
     pub fn last_switch_state(&mut self) -> State {
         self.switch_state
     }
 
+    #[inline]
     pub fn take_stack(&mut self, size: usize) -> Stack {
         self.stack_pool.take_stack(size)
     }
 
+    #[inline]
     pub fn give_stack(&mut self, stack: Stack) {
         self.stack_pool.give_stack(stack)
     }
