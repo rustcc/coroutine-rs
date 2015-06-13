@@ -149,13 +149,13 @@ impl Handle {
             to_coro.set_state(State::Running);
             from_coro.set_state(State::Normal);
 
-            env.coroutine_stack.push(unsafe { transmute(self) });
+            env.push(self);
             Context::swap(&mut from_coro.saved_context, &to_coro.saved_context);
 
             from_coro.set_state(State::Running);
         }
 
-        match env.running_state.take() {
+        match env.take_last_resume_result() {
             Some(err) => Err(Error::Panicking(err)),
             None => Ok(self.state()),
         }
@@ -236,8 +236,7 @@ impl Drop for Coroutine {
     fn drop(&mut self) {
         match self.current_stack_segment.take() {
             Some(stack) => {
-                let env = Environment::current();
-                env.stack_pool.give_stack(stack);
+                Environment::current().give_stack(stack);
             },
             None => {}
         }
@@ -253,13 +252,12 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
     let env = Environment::current();
 
     let cur: &mut Coroutine = unsafe {
-        let last = & **env.coroutine_stack.last().expect("Impossible happened! No current coroutine!");
-        last.get_inner_mut()
+        env.running().get_inner_mut()
     };
 
     let state = match ret {
         Ok(..) => {
-            env.running_state = None;
+            env.set_resume_result(None);
 
             State::Finished
         }
@@ -280,14 +278,16 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
                 let _ = writeln!(&mut stderr(), "Coroutine '{}' panicked at '{}'", name, msg);
             }
 
-            env.running_state = Some(err);
+            env.set_resume_result(Some(err));
 
             State::Panicked
         }
     };
 
     loop {
-        Coroutine::yield_now(state);
+        unsafe {
+            Coroutine::try_switch(env, state);
+        }
     }
 }
 
@@ -319,7 +319,7 @@ impl Coroutine {
     {
 
         let env = Environment::current();
-        let mut stack = env.stack_pool.take_stack(opts.stack_size);
+        let mut stack = env.take_stack(opts.stack_size);
 
         let ctx = Context::new(coroutine_initialize, 0, f, &mut stack);
 
@@ -340,19 +340,21 @@ impl Coroutine {
         assert!(state != State::Running);
 
         let env = Environment::current();
-        if env.coroutine_stack.len() == 1 {
-            // Environment root
-            return;
-        }
-
         unsafe {
-            match (env.coroutine_stack.pop(), env.coroutine_stack.last()) {
-                (Some(from_coro), Some(to_coro)) => {
-                    (&mut *from_coro).set_state(state);
-                    Context::swap(&mut (& *from_coro).get_inner_mut().saved_context, &(& **to_coro).saved_context);
-                },
-                _ => unreachable!()
-            }
+            Coroutine::try_switch(env, state)
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn try_switch(env: &mut Environment, state: State) {
+        match (env.pop(), env.running()) {
+            (Some(from_coro), to_coro) => {
+                from_coro.set_state(state);
+                Context::swap(&mut from_coro.get_inner_mut().saved_context,
+                              &to_coro.saved_context);
+            },
+            // Environment root
+            (None, _) => {}
         }
     }
 
@@ -374,8 +376,7 @@ impl Coroutine {
     /// in more than one native thread.
     #[inline]
     pub fn current() -> &'static Handle {
-        Environment::current().coroutine_stack.last().map(|hdl| unsafe { (& **hdl) })
-            .expect("Impossible happened! No current coroutine!")
+        Environment::current().running()
     }
 
     #[inline(always)]
