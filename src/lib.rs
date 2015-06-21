@@ -13,7 +13,7 @@
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
 #![allow(unused_features)]
-#![feature(std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size)]
+#![feature(std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size, core_simd, rt)]
 #![feature(rustc_private)]
 #![feature(unique)]
 
