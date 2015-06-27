@@ -18,9 +18,6 @@ fn main() {
             println!("4. Begin counting ...");
             for i in 0..5 {
                 println!("Counting {}", i);
-
-                // Yield to it's parent
-                Coroutine::sched();
             }
             println!("5. Counting finished");
         }).join().unwrap();
