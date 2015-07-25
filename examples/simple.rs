@@ -1,40 +1,15 @@
 extern crate coroutine;
 
-use coroutine::Coroutine;
+use coroutine::asymmetric::Coroutine;
 
 fn main() {
-    // Spawn a new coroutine
-    let coro = Coroutine::spawn(move|| {
-
-        println!("1. Hello in coroutine!");
-
-        // Yield back to it's parent
-        Coroutine::sched();
-
-        println!("3. We are back!!");
-
-        // Spawn a new coroutine
-        Coroutine::spawn(move|| {
-            println!("4. Begin counting ...");
-            for i in 0..5 {
-                println!("Counting {}", i);
-
-                // Yield to it's parent
-                Coroutine::sched();
-            }
-            println!("5. Counting finished");
-        }).join().unwrap();
-
-        println!("6. Good bye");
+    let coro = Coroutine::spawn(|me| {
+        for num in 0..10 {
+            me.yield_with(num);
+        }
     });
 
-    // Resume `coro`
-    coro.resume().unwrap();;
-
-    println!("2. We are here!");
-
-    // Resume the coroutine
-    coro.resume().unwrap();
-
-    println!("7. Back to main.");
+    for num in coro {
+        println!("{}", num.unwrap());
+    }
 }

@@ -53,14 +53,22 @@ impl Context {
     ///        this is to reduce the number of allocations made when a green
     ///        task is spawned as much as possible
     pub fn new<F>(init: InitFn, arg: usize, start: F, stack: &mut Stack) -> Context
-            where F: FnOnce() + Send + 'static {
+            where F: FnOnce() + Send + 'static
+    {
+        let mut ctx = Context::empty();
+        ctx.init_with(init, arg, start, stack);
+        ctx
+    }
+
+    pub fn init_with<F>(&mut self, init: InitFn, arg: usize, start: F, stack: &mut Stack)
+        where F: FnOnce() + Send + 'static
+    {
         let sp: *const usize = stack.end();
         let sp: *mut usize = sp as *mut usize;
         // Save and then immediately load the current context,
         // which we will then modify to call the given function when restored
-        let mut regs = Box::new(Registers::new());
 
-        initialize_call_frame(&mut regs, init, arg, unsafe { transmute(Box::new(Thunk::new(start))) }, sp);
+        initialize_call_frame(&mut self.regs, init, arg, unsafe { transmute(Box::new(Thunk::new(start))) }, sp);
 
         // Scheduler tasks don't have a stack in the "we allocated it" sense,
         // but rather they run on pthreads stacks. We have complete control over
@@ -68,16 +76,12 @@ impl Context {
         // overflow). Additionally, their coroutine stacks are listed as being
         // zero-length, so that's how we detect what's what here.
         let stack_base: *const usize = stack.start();
-        let bounds =
+        self.stack_bounds =
             if sp as libc::uintptr_t == stack_base as libc::uintptr_t {
                 None
             } else {
                 Some((stack_base as usize, sp as usize))
             };
-        return Context {
-            regs: regs,
-            stack_bounds: bounds,
-        }
     }
 
     /* Switch contexts

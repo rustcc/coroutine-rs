@@ -14,15 +14,6 @@ homepage = "https://github.com/rustcc/coroutine-rs"
 build = "build.rs"
 keywords = ["coroutine", "green", "thread", "fiber"]
 
-[features]
-default = [
-    "enable-clonable-handle",
-]
-
-enable-clonable-handle = [
-    "spin"
-]
-
 [build-dependencies]
 gcc = "*"
 log = "*"
@@ -33,10 +24,6 @@ path = "src/lib.rs"
 
 [dependencies]
 mmap = "*"
-
-[dependencies.spin]
-version = "*"
-optional = true
 
 [dev-dependencies]
 num_cpus = "*"
