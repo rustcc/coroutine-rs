@@ -129,8 +129,8 @@ impl<T: Send + 'static> fmt::Debug for Coroutine<T> {
 
 impl<T: Send + 'static> Coroutine<T> {
     #[inline]
-    pub fn spawn_opts<F>(f: F, opts: Options) -> Coroutine<T>
-        where F: FnOnce(CoroutineRef<T>) + Send + 'static
+    pub fn spawn_opts<'a, F>(mut f: F, opts: Options) -> Coroutine<T>
+        where F: FnMut(CoroutineRef<T>) + Send + 'a
     {
         let mut stack = STACK_POOL.with(|pool| unsafe {
             (&mut *pool.get()).take_stack(opts.stack_size)
@@ -203,8 +203,8 @@ impl<T: Send + 'static> Coroutine<T> {
     }
 
     #[inline]
-    pub fn spawn<F>(f: F) -> Coroutine<T>
-        where F: FnOnce(CoroutineRef<T>) + Send + 'static
+    pub fn spawn<'a, F>(f: F) -> Coroutine<T>
+        where F: FnMut(CoroutineRef<T>) + Send + 'a
     {
         Coroutine::spawn_opts(f, Default::default())
     }
@@ -349,6 +349,24 @@ mod test {
         for num in 0..10 {
             assert_eq!(Some(Foo(num)), coro.resume().unwrap());
         }
+    }
+
+    #[test]
+    fn test_coroutine_mut() {
+        let mut outer = 0;
+
+        let coro = Coroutine::spawn(|me| {
+            loop {
+                outer += 1;
+                me.yield_with(outer);
+            }
+        });
+
+        for _ in 0..10 {
+            coro.resume().unwrap();
+        }
+
+        assert_eq!(outer, 10);
     }
 }
 

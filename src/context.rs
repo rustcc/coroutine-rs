@@ -52,16 +52,16 @@ impl Context {
     /// FIXME: this is basically an awful the interface. The main reason for
     ///        this is to reduce the number of allocations made when a green
     ///        task is spawned as much as possible
-    pub fn new<F>(init: InitFn, arg: usize, start: F, stack: &mut Stack) -> Context
-            where F: FnOnce() + Send + 'static
+    pub fn new<'a, F>(init: InitFn, arg: usize, start: F, stack: &mut Stack) -> Context
+            where F: FnOnce() + Send + 'a
     {
         let mut ctx = Context::empty();
         ctx.init_with(init, arg, start, stack);
         ctx
     }
 
-    pub fn init_with<F>(&mut self, init: InitFn, arg: usize, start: F, stack: &mut Stack)
-        where F: FnOnce() + Send + 'static
+    pub fn init_with<'a, F>(&mut self, init: InitFn, arg: usize, start: F, stack: &mut Stack)
+        where F: FnOnce() + Send + 'a
     {
         let sp: *const usize = stack.end();
         let sp: *mut usize = sp as *mut usize;
