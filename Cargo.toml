@@ -23,6 +23,8 @@ enable-clonable-handle = [
     "spin"
 ]
 
+enable-panic-message = []
+
 [build-dependencies]
 gcc = "*"
 log = "*"

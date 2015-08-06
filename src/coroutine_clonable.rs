@@ -269,7 +269,7 @@ extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
             State::Finished
         }
         Err(err) => {
-            {
+            if cfg!(feature = "enable-panic-message") {
                 use std::io::stderr;
                 use std::io::Write;
                 let msg = match err.downcast_ref::<&'static str>() {
