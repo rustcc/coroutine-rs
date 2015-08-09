@@ -20,6 +20,7 @@
 extern crate libc;
 extern crate test;
 extern crate mmap;
+extern crate context;
 
 use std::any::Any;
 use std::fmt::{self, Debug};
@@ -30,11 +31,6 @@ pub use options::Options;
 pub mod asymmetric;
 pub mod options;
 // pub mod builder;
-
-mod context;
-mod stack;
-mod thunk; // use self-maintained thunk, because std::thunk is temporary. May be replaced by FnBox in the future.
-mod sys;
 
 /// Return type of resuming. Ok if resume successfully with the current state,
 /// Err if resume failed with `Error`.
