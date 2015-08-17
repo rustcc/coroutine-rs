@@ -1,4 +1,3 @@
-#![feature(scoped)]
 extern crate coroutine;
 extern crate num_cpus;
 
@@ -11,7 +10,7 @@ fn main() {
     let mut threads = Vec::with_capacity(num_cpus::get());
 
     for i in 0..num_cpus::get() {
-        let t = thread::scoped(move|| {
+        let t = thread::spawn(move|| {
             spawn(move|| {
                 let thread_id = i;
                 spawn(move|| {
@@ -26,6 +25,6 @@ fn main() {
     }
 
     for t in threads.into_iter() {
-        t.join();
+        t.join().unwrap();
     }
 }

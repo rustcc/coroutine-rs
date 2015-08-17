@@ -31,7 +31,6 @@
 //  DEALINGS IN THE SOFTWARE.
 
 use std::ptr;
-use std::env::page_size;
 use std::fmt;
 
 use libc;
@@ -159,5 +158,21 @@ fn protect_last_page(stack: &MemoryMap) -> bool {
         libc::VirtualProtect(last_page, page_size() as libc::SIZE_T,
                              libc::PAGE_NOACCESS,
                              &mut old_prot as libc::LPDWORD) != 0
+    }
+}
+
+#[cfg(unix)]
+fn page_size() -> usize {
+    unsafe {
+        libc::sysconf(libc::_SC_PAGESIZE) as usize
+    }
+}
+
+#[cfg(windows)]
+fn page_size() -> usize {
+    unsafe {
+        let mut info = mem::zeroed();
+        libc::GetSystemInfo(&mut info);
+        info.dwPageSize as usize
     }
 }
