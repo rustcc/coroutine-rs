@@ -25,7 +25,8 @@ extern crate mmap;
 extern crate spin;
 
 use std::any::Any;
-use std::fmt::{self, Debug};
+use std::error;
+use std::fmt::{self, Display};
 
 #[cfg(feature = "enable-clonable-handle")]
 pub use coroutine_clonable as coroutine;
@@ -119,6 +120,7 @@ pub enum State {
 pub type Result = ::std::result::Result<State, Error>;
 
 /// Resume Error
+#[derive(Debug)]
 pub enum Error {
     /// Coroutine is already finished
     Finished,
@@ -133,22 +135,37 @@ pub enum Error {
     Panicking(Box<Any + Send>),
 }
 
-impl Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &Error::Finished => write!(f, "Finished"),
-            &Error::Waiting => write!(f, "Waiting"),
-            &Error::Panicked => write!(f, "Panicked"),
-            &Error::Panicking(ref err) => {
-                let msg = match err.downcast_ref::<&'static str>() {
+impl Error {
+    fn description(&self) -> &str {
+        match *self {
+            Error::Finished => "Finished",
+            Error::Waiting => "Waiting",
+            Error::Panicked => "Panicked",
+            Error::Panicking(ref err) => {
+                match err.downcast_ref::<&'static str>() {
                     Some(s) => *s,
                     None => match err.downcast_ref::<String>() {
                         Some(s) => &s[..],
                         None => "Box<Any>",
                     }
-                };
-                write!(f, "Panicking({})", msg)
+                }
             }
         }
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description())
+    }
+}
+
+impl error::Error for Error {
+    fn description(&self) -> &str {
+        self.description()
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        Some(self)
     }
 }
