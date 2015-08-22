@@ -121,7 +121,7 @@ impl Handle {
     }
 
     /// Resume the Coroutine
-    pub fn resume(&self) -> Result {
+    pub fn resume(&self) -> Result<State> {
         {
             let mut self_state = self.state_lock().lock();
 
@@ -178,7 +178,7 @@ impl Handle {
     /// }).join().unwrap();
     /// ```
     #[inline]
-    pub fn join(&self) -> Result {
+    pub fn join(&self) -> Result<State> {
         loop {
             match self.resume() {
                 Ok(State::Finished) => break,
