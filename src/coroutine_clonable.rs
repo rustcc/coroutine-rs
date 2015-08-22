@@ -76,7 +76,6 @@
  */
 
 use std::default::Default;
-use thunk::Thunk;
 use std::mem::transmute;
 use std::rt::unwind::try;
 use std::cell::UnsafeCell;
@@ -84,10 +83,12 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::fmt::{self, Debug};
 
+use context::thunk::Thunk;
+
 use spin::Mutex;
 
 use context::Context;
-use stack::Stack;
+use context::stack::Stack;
 use environment::Environment;
 use {Options, Result, Error, State};
 

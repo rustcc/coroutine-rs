@@ -23,7 +23,8 @@ use std::cell::UnsafeCell;
 use std::any::Any;
 use std::mem;
 
-use stack::{StackPool, Stack};
+use context::stack::{StackPool, Stack};
+
 use coroutine::Coroutine;
 use {State, Handle};
 

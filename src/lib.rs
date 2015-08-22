@@ -20,9 +20,9 @@
 #[macro_use] extern crate log;
 extern crate libc;
 extern crate test;
-extern crate mmap;
 #[cfg(feature = "enable-clonable-handle")]
 extern crate spin;
+extern crate context;
 
 use std::any::Any;
 use std::fmt::{self, Debug};
@@ -37,7 +37,6 @@ pub use builder::Builder;
 pub use coroutine::{Coroutine, Handle};
 pub use options::Options;
 
-mod context;
 #[cfg(feature = "enable-clonable-handle")]
 pub mod coroutine_clonable;
 #[cfg(not(feature = "enable-clonable-handle"))]
@@ -45,9 +44,6 @@ pub mod coroutine_unique;
 
 pub mod builder;
 pub mod options;
-mod stack;
-mod thunk; // use self-maintained thunk, because std::thunk is temporary. May be replaced by FnBox in the future.
-mod sys;
 mod environment;
 
 #[cfg(test)]
