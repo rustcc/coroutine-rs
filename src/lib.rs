@@ -136,7 +136,7 @@ pub enum Error {
 }
 
 impl Error {
-    fn description(&self) -> &str {
+    pub fn description(&self) -> &str {
         match *self {
             Error::Finished => "Finished",
             Error::Waiting => "Waiting",
