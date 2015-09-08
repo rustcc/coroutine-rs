@@ -19,15 +19,15 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use coroutine::{Coroutine, Handle};
+use asymmetric;
 use options::Options;
 
 /// Coroutine configuration. Provides detailed control over the properties and behavior of new Coroutines.
 ///
 /// ```ignore
-/// let coro = Builder::new().name(format!("Coroutine #{}", 1))
-///                          .stack_size(4096)
-///                          .spawn(|| println!("Hello world!!"));
+/// let coro = AsymmetricBuilder::new().name(format!("Coroutine #{}", 1))
+///                                    .stack_size(4096)
+///                                    .spawn(|_| println!("Hello world!!"));
 ///
 /// coro.resume().unwrap();
 /// ```
@@ -56,25 +56,23 @@ impl Builder {
     }
 
     /// Spawn a new Coroutine, and return a handle for it.
-    pub fn spawn<F>(self, f: F) -> Handle
-        where F: FnOnce() + Send + 'static
+    pub fn spawn_asymmetric<T, F>(self, f: F) -> asymmetric::Handle<T>
+        where F: FnOnce(&mut asymmetric::Coroutine<T>) + Send + 'static,
+              T: Send + 'static
     {
-        Coroutine::spawn_opts(f, self.opts)
+        asymmetric::Coroutine::spawn_opts(f, self.opts)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::sync::mpsc::channel;
-
-    use super::Builder;
+    use super::*;
 
     #[test]
-    fn test_builder_basic() {
-        let (tx, rx) = channel();
-        Builder::new().name("Test builder".to_string()).spawn(move|| {
-            tx.send(1).unwrap();
-        }).join().ok().expect("Failed to join");
-        assert_eq!(rx.recv().unwrap(), 1);
+    fn test_asymmetric_builder_basic() {
+        let ret = Builder::new().name("Test builder".to_string()).spawn_asymmetric(move|me| {
+            me.yield_with(1);
+        }).resume();
+        assert_eq!(Some(1), ret.unwrap());
     }
 }

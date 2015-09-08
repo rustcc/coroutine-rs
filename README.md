@@ -23,84 +23,47 @@ Basic usage of Coroutine
 ```rust
 extern crate coroutine;
 
-use coroutine::Coroutine;
+use coroutine::asymmetric::Coroutine;
 
 fn main() {
-    // Spawn a new coroutine
-    let coro = Coroutine::spawn(move|| {
-
-        println!("1. Hello in coroutine!");
-
-        // Yield back to it's parent
-        Coroutine::sched();
-
-        println!("3. We are back!!");
-
-        // Spawn a new coroutine
-        Coroutine::spawn(move|| {
-            println!("4. Begin counting ...");
-            for i in 0..5 {
-                println!("Counting {}", i);
-
-                // Yield to it's parent
-                Coroutine::sched();
-            }
-            println!("5. Counting finished");
-        }).join().unwrap();
-
-        println!("6. Good bye");
+    let coro: Coroutine<i32> = Coroutine::spawn(|me| {
+        for num in 0..10 {
+            me.yield_with(num);
+        }
     });
 
-    // Resume `coro`
-    coro.resume().unwrap();;
-
-    println!("2. We are here!");
-
-    // Resume the coroutine
-    coro.resume().unwrap();
-
-    println!("7. Back to main.");
+    for num in coro {
+        println!("{}", num.unwrap());
+    }
 }
 ```
 
 This program will print the following to the console
 
 ```
-1. Hello in coroutine!
-2. We are here!
-3. We are back!!
-4. Begin counting ...
-Counting 0
-Counting 1
-Counting 2
-Counting 3
-Counting 4
-5. Counting finished
-6. Good bye
-7. Back to main.
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
 ```
 
 For more detail, please run `cargo doc --open`.
-
-## Features
-
-- Feature `enable-clonable-handle` is enabled by default. The Coroutine is thread-safe, so the handle (`coroutine::Handle`) is clonable.
-
-- If the feature `enable-clonable-handle` is disable, the handle will become unique, which may improve context switch performance because no lock is required.
 
 ## Goals
 
 - [x] Basic single threaded coroutine support
 
-- [x] Clonable coroutine handle
+- [x] Asymmetric Coroutines
 
-- [x] Unique coroutine handle (for special usage)
+- [ ] Symmetric Coroutines
 
-- [x] Thread-safe: can only resume a coroutine in one thread simultaneously
-
-- [ ] Multithreaded scheduler with work stealing feature
-
-- [ ] Asynchronous I/O supports
+- [ ] Thread-safe: can only resume a coroutine in one thread simultaneously
 
 ## Notes
 

@@ -13,17 +13,6 @@ readme = "README.md"
 homepage = "https://github.com/rustcc/coroutine-rs"
 keywords = ["coroutine", "green", "thread", "fiber"]
 
-[features]
-default = [
-    "enable-clonable-handle",
-]
-
-enable-clonable-handle = [
-    "spin"
-]
-
-enable-panic-message = []
-
 [build-dependencies]
 gcc = "*"
 log = "*"
@@ -33,11 +22,8 @@ name = "coroutine"
 path = "src/lib.rs"
 
 [dependencies]
-context = "^0.1.2"
-
-[dependencies.spin]
-version = "*"
-optional = true
+libc = "^0.1.10"
+context = { git = "http://github.com/zonyitoo/context-rs.git" }
 
 [dev-dependencies]
 num_cpus = "*"
