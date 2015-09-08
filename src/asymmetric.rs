@@ -250,8 +250,6 @@ impl<T> Coroutine<T>
                 Err(err) => {
                     if let None = err.downcast_ref::<ForceUnwind>() {
                         {
-                            use std::io::stderr;
-                            use std::io::Write;
                             let msg = match err.downcast_ref::<&'static str>() {
                                 Some(s) => *s,
                                 None => match err.downcast_ref::<String>() {
@@ -261,7 +259,7 @@ impl<T> Coroutine<T>
                             };
 
                             let name = coro_ref.name().unwrap_or("<unnamed>");
-                            let _ = writeln!(&mut stderr(), "Coroutine '{}' panicked at '{}'", name, msg);
+                            error!("Coroutine '{}' panicked at '{}'", name, msg);
                         }
 
                         coro_ref.result = Some(Err(CoroError::Panicking(err)));
@@ -389,5 +387,112 @@ impl<T> Iterator for Coroutine<T>
             Ok(r) => r.map(|x| Ok(x)),
             Err(err) => Some(Err(err)),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_asymmetric_basic() {
+        let coro = Coroutine::spawn(|me| {
+            for i in 0..10 {
+                me.yield_with(i);
+            }
+        });
+
+        for (i, j) in coro.zip(0..10) {
+            assert_eq!(i.unwrap(), j);
+        }
+    }
+
+    #[test]
+    fn test_asymmetric_panic() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let cloned_counter = counter.clone();
+        let coro: Coroutine<()> = Coroutine::spawn(move|_| {
+            struct Foo(Arc<AtomicUsize>);
+
+            impl Drop for Foo {
+                fn drop(&mut self) {
+                    self.0.store(1, Ordering::SeqCst);
+                }
+            }
+
+            let _foo = Foo(cloned_counter);
+
+            panic!("Panicked inside");
+        });
+
+        let result = coro.resume();
+        assert!(result.is_err());
+
+        assert_eq!(1, counter.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_asymmetric_unwinding() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        {
+            let cloned_counter = counter.clone();
+            let coro: Coroutine<()> = Coroutine::spawn(move|me| {
+                struct Foo(Arc<AtomicUsize>);
+
+                impl Drop for Foo {
+                    fn drop(&mut self) {
+                        self.0.store(1, Ordering::SeqCst);
+                    }
+                }
+
+                let _foo = Foo(cloned_counter);
+
+                me.yield_back();
+
+                unreachable!("Never reach here");
+            });
+
+            let result = coro.resume();
+            assert!(result.is_ok());
+
+            // Destroy the coro without resume
+        }
+
+        assert_eq!(1, counter.load(Ordering::SeqCst));
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+
+    use test::Bencher;
+
+    #[bench]
+    fn bench_asymmetric_spawn(b: &mut Bencher) {
+        b.iter(|| {
+            let _coro: Coroutine<i32> = Coroutine::spawn(|_| { 1; });
+        });
+    }
+
+    #[bench]
+    fn bench_asymmetric_resume(b: &mut Bencher) {
+        let coro: Coroutine<()> = Coroutine::spawn(|me| {
+            while let None = me.yield_back() {}
+        });
+
+        b.iter(|| {
+            coro.resume().unwrap();
+        });
+
+        coro.resume_with(()).unwrap();;
     }
 }
