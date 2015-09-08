@@ -22,8 +22,8 @@ name = "coroutine"
 path = "src/lib.rs"
 
 [dependencies]
-mmap = "*"
-context = "*"
+libc = "^0.1.10"
+context = { git = "http://github.com/zonyitoo/context-rs.git" }
 
 [dev-dependencies]
 num_cpus = "*"

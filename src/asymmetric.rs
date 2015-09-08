@@ -1,6 +1,6 @@
 // The MIT License (MIT)
 
-// Copyright (c) 2015 Rustcc Developers
+// Copyright (c) 2015 Y. T. Chung <zonyitoo@gmail.com>
 
 //  Permission is hereby granted, free of charge, to any person obtaining a
 //  copy of this software and associated documentation files (the "Software"),
@@ -20,6 +20,9 @@
 //  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 //  DEALINGS IN THE SOFTWARE.
 
+extern crate context;
+extern crate libc;
+
 use std::iter::Iterator;
 use std::mem::transmute;
 use std::cell::UnsafeCell;
@@ -28,22 +31,50 @@ use std::ops::DerefMut;
 use std::fmt;
 use std::rt::unwind::try;
 use std::rt::unwind::begin_unwind;
+use std::rt;
+use std::boxed::FnBox;
+use std::any::Any;
 
 use context::Context;
 use context::stack::{Stack, StackPool};
-use context::thunk::Thunk;
 
-use options::Options;
+pub struct Options {
+    stack_size: usize,
+    name: Option<String>,
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            stack_size: rt::min_stack(),
+            name: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum CoroError {
+    Panicking(Box<Any + Send>),
+    Panicked,
+}
+
+pub type CoroResult<T> = Result<T, CoroError>;
 
 thread_local!(static STACK_POOL: UnsafeCell<StackPool> = UnsafeCell::new(StackPool::new()));
 
 struct ForceUnwind;
 
 /// Initialization function for make context
-extern "C" fn coroutine_initialize(_: usize, f: *mut ()) -> ! {
-    let func: Box<Thunk> = unsafe { transmute(f) };
-    func.invoke(());
-    loop {}
+extern "C" fn coroutine_initialize(_: usize, f: *mut libc::c_void) -> ! {
+    {
+        let func: Box<Box<FnBox()>> = unsafe {
+            Box::from_raw(f as *mut Box<FnBox()>)
+        };
+
+        func();
+    }
+
+    unreachable!("Never reach here");
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -56,29 +87,25 @@ enum State {
 
 #[allow(raw_pointer_derive)]
 #[derive(Debug)]
-struct CoroutineImpl<F, T = ()>
-    where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
+struct CoroutineImpl<T = ()>
+    where T: Send
 {
     parent: Context,
     context: Context,
     stack: Option<Stack>,
 
     name: Option<String>,
-    function: F,
     state: State,
 
-    result: Option<::Result<*mut Option<T>>>,
+    result: Option<CoroResult<*mut Option<T>>>,
 }
 
-unsafe impl<F, T> Send for CoroutineImpl<F, T>
+unsafe impl<T> Send for CoroutineImpl<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {}
 
-impl<F, T> fmt::Display for CoroutineImpl<F, T>
-    where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
+impl<T> fmt::Display for CoroutineImpl<T>
+    where T: Send
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Coroutine({})", self.name.as_ref()
@@ -87,9 +114,8 @@ impl<F, T> fmt::Display for CoroutineImpl<F, T>
     }
 }
 
-impl<F, T> CoroutineImpl<F, T>
+impl<T> CoroutineImpl<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {
     unsafe fn yield_back(&mut self) -> Option<T> {
         Context::swap(&mut self.context, &self.parent);
@@ -105,7 +131,7 @@ impl<F, T> CoroutineImpl<F, T>
         }
     }
 
-    unsafe fn resume(&mut self) -> ::Result<Option<T>> {
+    unsafe fn resume(&mut self) -> CoroResult<Option<T>> {
         Context::swap(&mut self.parent, &self.context);
         match self.result.take() {
             None => Ok(None),
@@ -131,7 +157,7 @@ impl<F, T> CoroutineImpl<F, T>
         self.yield_back()
     }
 
-    unsafe fn resume_with(&mut self, data: T) -> ::Result<Option<T>> {
+    unsafe fn resume_with(&mut self, data: T) -> CoroResult<Option<T>> {
         self.result = Some(Ok(&mut Some(data)));
         self.resume()
     }
@@ -144,9 +170,8 @@ impl<F, T> CoroutineImpl<F, T>
     }
 }
 
-impl<F, T> Drop for CoroutineImpl<F, T>
+impl<T> Drop for CoroutineImpl<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {
     fn drop(&mut self) {
         unsafe {
@@ -160,28 +185,27 @@ impl<F, T> Drop for CoroutineImpl<F, T>
     }
 }
 
-pub struct Coroutine<F, T>
+pub struct Coroutine<T>
     where T: Send + 'static,
-          F: FnMut(CoroutineRef<F, T>)
 {
-    coro: UnsafeCell<Box<CoroutineImpl<F, T>>>,
+    coro: UnsafeCell<Box<CoroutineImpl<T>>>,
 }
 
-impl<F, T> fmt::Debug for Coroutine<F, T>
+impl<T> fmt::Debug for Coroutine<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self.coro.get())
     }
 }
 
-impl<F, T> Coroutine<F, T>
+impl<T> Coroutine<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {
     #[inline]
-    pub fn spawn_opts(f: F, opts: Options) -> Coroutine<F, T> {
+    pub fn spawn_opts<F>(f: F, opts: Options) -> Coroutine<T>
+        where F: FnOnce(CoroutineRef<T>)
+    {
         let mut stack = STACK_POOL.with(|pool| unsafe {
             (&mut *pool.get()).take_stack(opts.stack_size)
         });
@@ -191,13 +215,12 @@ impl<F, T> Coroutine<F, T>
             context: Context::empty(),
             stack: None,
             name: opts.name,
-            function: f,
             state: State::Created,
             result: None,
         });
 
-        let coro_ref: &mut CoroutineImpl<F, T> = unsafe {
-            let ptr: *mut CoroutineImpl<F, T> = coro.deref_mut();
+        let coro_ref: &mut CoroutineImpl<T> = unsafe {
+            let ptr: *mut CoroutineImpl<T> = coro.deref_mut();
             &mut *ptr
         };
 
@@ -211,14 +234,14 @@ impl<F, T> Coroutine<F, T>
             let ret = unsafe {
                 let puller_ref = puller_ref.clone();
                 try(|| {
-                    let coro_ref: &mut CoroutineImpl<F, T> = &mut *puller_ref.coro;
+                    let coro_ref: &mut CoroutineImpl<T> = &mut *puller_ref.coro;
                     coro_ref.state = State::Running;
-                    (coro_ref.function)(puller_ref)
+                    f(puller_ref)
                 })
             };
 
             unsafe {
-                let coro_ref: &mut CoroutineImpl<F, T> = &mut *puller_ref.coro;
+                let coro_ref: &mut CoroutineImpl<T> = &mut *puller_ref.coro;
                 coro_ref.state = State::Finished;
             }
 
@@ -241,7 +264,7 @@ impl<F, T> Coroutine<F, T>
                             let _ = writeln!(&mut stderr(), "Coroutine '{}' panicked at '{}'", name, msg);
                         }
 
-                        coro_ref.result = Some(Err(::Error::Panicking(err)));
+                        coro_ref.result = Some(Err(CoroError::Panicking(err)));
                         true
                     } else {
                         false
@@ -251,7 +274,7 @@ impl<F, T> Coroutine<F, T>
 
             loop {
                 if is_panicked {
-                    coro_ref.result = Some(Err(::Error::Panicked));
+                    coro_ref.result = Some(Err(CoroError::Panicked));
                 }
 
                 unsafe {
@@ -260,7 +283,7 @@ impl<F, T> Coroutine<F, T>
             }
         };
 
-        coro.context.init_with(coroutine_initialize, 0, wrapper, &mut stack);
+        coro.context.init_with(coroutine_initialize, 0, Box::new(wrapper), &mut stack);
         coro.stack = Some(stack);
 
         Coroutine {
@@ -269,7 +292,9 @@ impl<F, T> Coroutine<F, T>
     }
 
     #[inline]
-    pub fn spawn(f: F) -> Coroutine<F, T> {
+    pub fn spawn<F>(f: F) -> Coroutine<T>
+        where F: FnOnce(CoroutineRef<T>)
+    {
         Coroutine::spawn_opts(f, Default::default())
     }
 
@@ -281,56 +306,51 @@ impl<F, T> Coroutine<F, T>
     }
 
     #[inline]
-    pub fn resume(&self) -> ::Result<Option<T>> {
+    pub fn resume(&self) -> CoroResult<Option<T>> {
         unsafe {
             (&mut *self.coro.get()).resume()
         }
     }
 
     #[inline]
-    pub fn resume_with(&self, data: T) -> ::Result<Option<T>> {
+    pub fn resume_with(&self, data: T) -> CoroResult<Option<T>> {
         unsafe {
             (&mut *self.coro.get()).resume_with(data)
         }
     }
 }
 
-pub struct CoroutineRef<F, T>
+pub struct CoroutineRef<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {
-    coro: *mut CoroutineImpl<F, T>,
+    coro: *mut CoroutineImpl<T>,
 }
 
-impl<F, T> Copy for CoroutineRef<F, T>
+impl<T> Copy for CoroutineRef<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {}
 
-impl<F, T> Clone for CoroutineRef<F, T>
+impl<T> Clone for CoroutineRef<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {
-    fn clone(&self) -> CoroutineRef<F, T> {
+    fn clone(&self) -> CoroutineRef<T> {
         CoroutineRef {
             coro: self.coro,
         }
     }
 }
 
-unsafe impl<F, T> Send for CoroutineRef<F, T>
+unsafe impl<T> Send for CoroutineRef<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {}
 
-impl<F, T> CoroutineRef<F, T>
+impl<T> CoroutineRef<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {
     #[inline]
     pub fn yield_back(&self) -> Option<T> {
         unsafe {
-            let coro: &mut CoroutineImpl<F, T> = transmute(self.coro);
+            let coro: &mut CoroutineImpl<T> = transmute(self.coro);
             coro.yield_back()
         }
     }
@@ -338,7 +358,7 @@ impl<F, T> CoroutineRef<F, T>
     #[inline]
     pub fn yield_with(&self, data: T) -> Option<T> {
         unsafe {
-            let coro: &mut CoroutineImpl<F, T> = transmute(self.coro);
+            let coro: &mut CoroutineImpl<T> = transmute(self.coro);
             coro.yield_with(data)
         }
     }
@@ -353,159 +373,21 @@ impl<F, T> CoroutineRef<F, T>
     #[inline]
     pub fn take_data(&self) -> Option<T> {
         unsafe {
-            let coro: &mut CoroutineImpl<F, T> = transmute(self.coro);
+            let coro: &mut CoroutineImpl<T> = transmute(self.coro);
             coro.take_data()
         }
     }
 }
 
-impl<F, T> Iterator for Coroutine<F, T>
+impl<T> Iterator for Coroutine<T>
     where T: Send,
-          F: FnMut(CoroutineRef<F, T>)
 {
-    type Item = ::Result<T>;
+    type Item = CoroResult<T>;
 
-    fn next(&mut self) -> Option<::Result<T>> {
+    fn next(&mut self) -> Option<CoroResult<T>> {
         match self.resume() {
             Ok(r) => r.map(|x| Ok(x)),
             Err(err) => Some(Err(err)),
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_coroutine_basic() {
-        let coro = Coroutine::spawn(|me| {
-            for num in 0..10 {
-                me.yield_with(num);
-            }
-        });
-
-        for num in 0..10 {
-            assert_eq!(Some(num), coro.resume().unwrap());
-        }
-    }
-
-    #[test]
-    fn test_coroutine_generator() {
-        let generator = Coroutine::spawn(|me| {
-            for num in 0..10 {
-                me.yield_with(num);
-            }
-        });
-
-        for (actual, num) in generator.enumerate() {
-            assert_eq!(actual, num.unwrap());
-        }
-    }
-
-    #[test]
-    fn test_panic_inside() {
-        let will_panic: Coroutine<_, ()> = Coroutine::spawn(|_| {
-            panic!("Panic inside");
-        });
-
-        assert!(will_panic.resume().is_err());
-    }
-
-    #[test]
-    fn test_coroutine_push() {
-        let coro = Coroutine::spawn(|me| {
-            assert_eq!(Some(0), me.take_data());
-
-            for num in 1..10 {
-                assert_eq!(Some(num), me.yield_back());
-            }
-        });
-
-        for num in 0..10 {
-            coro.resume_with(num).unwrap();
-        }
-    }
-
-    #[test]
-    fn test_coroutine_pull_struct() {
-        #[derive(Eq, PartialEq, Debug)]
-        struct Foo(i32);
-
-        let coro = Coroutine::spawn(|me| {
-            for num in 0..10 {
-                me.yield_with(Foo(num));
-            }
-        });
-
-        for num in 0..10 {
-            assert_eq!(Some(Foo(num)), coro.resume().unwrap());
-        }
-    }
-
-    #[test]
-    fn test_coroutine_mut() {
-        let mut outer = 0;
-
-        {
-            let coro = Coroutine::spawn(|me| {
-                loop {
-                    outer += 1;
-                    me.yield_with(outer);
-                }
-            });
-
-            for _ in 0..10 {
-                coro.resume().unwrap();
-            }
-        }
-
-        assert_eq!(outer, 10);
-    }
-
-    #[test]
-    fn test_coroutine_unwind() {
-        let mut counter = 0;
-
-        {
-            let coro: Coroutine<_, ()> = Coroutine::spawn(|me| {
-                struct Guard<'a>(&'a mut i32);
-
-                impl<'a> Drop for Guard<'a> {
-                    fn drop(&mut self) {
-                        *self.0 += 1;
-                    }
-                }
-
-                let _guard = Guard(&mut counter);
-                *_guard.0 += 1;
-                me.yield_back();
-            });
-
-            coro.resume().unwrap();
-        }
-
-        assert_eq!(counter, 2);
-    }
-}
-
-#[cfg(test)]
-mod benchmark {
-    use super::*;
-
-    use test::Bencher;
-
-    #[bench]
-    fn bench_coroutine_spawn(b: &mut Bencher) {
-        b.iter(|| {
-            let _: Coroutine<_, ()> = Coroutine::spawn(move|_| {});
-        });
-    }
-
-    #[bench]
-    fn bench_context_switch(b: &mut Bencher) {
-        let coro: Coroutine<_, ()> = Coroutine::spawn(|me| loop { me.yield_back(); });
-
-        b.iter(|| coro.resume());
     }
 }

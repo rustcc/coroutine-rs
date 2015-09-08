@@ -12,25 +12,20 @@
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
-#![allow(unused_features)]
-#![feature(std_misc, libc, asm, core, alloc, test, unboxed_closures, page_size)]
-#![feature(rustc_private, core_simd, rt)]
+#![feature(rustc_private, rt, fnbox, asm, test, unboxed_closures, box_raw)]
 
 #[macro_use] extern crate log;
 extern crate libc;
 extern crate test;
-extern crate mmap;
 extern crate context;
 
 use std::any::Any;
 use std::fmt::{self, Debug};
 
 pub use options::Options;
-// pub use builder::AsymmetricBuilder;
 
 pub mod asymmetric;
 pub mod options;
-// pub mod builder;
 
 /// Return type of resuming. Ok if resume successfully with the current state,
 /// Err if resume failed with `Error`.
