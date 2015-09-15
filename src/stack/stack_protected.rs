@@ -32,6 +32,7 @@
 
 use std::ptr;
 use std::fmt;
+use std::mem;
 
 use libc;
 
