@@ -29,36 +29,23 @@ use std::cell::UnsafeCell;
 use std::default::Default;
 use std::ops::DerefMut;
 use std::fmt;
-use std::rt::unwind::try;
-use std::rt::unwind::begin_unwind;
-use std::rt;
 use std::boxed::FnBox;
-use std::any::Any;
+use std::thread;
 
 use context::Context;
 use context::stack::{Stack, StackPool};
 
-pub struct Options {
-    stack_size: usize,
-    name: Option<String>,
+use options::Options;
+
+// Catch panics inside coroutines
+unsafe fn try<R, F: FnOnce() -> R>(f: F) -> thread::Result<R> {
+    let mut f = Some(f);
+    let f = &mut f as *mut Option<F> as usize;
+    thread::catch_panic(move || {
+        (*(f as *mut Option<F>)).take().unwrap()()
+    })
 }
 
-impl Default for Options {
-    fn default() -> Options {
-        Options {
-            stack_size: rt::min_stack(),
-            name: None,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum CoroError {
-    Panicking(Box<Any + Send>),
-    Panicked,
-}
-
-pub type CoroResult<T> = Result<T, CoroError>;
 
 thread_local!(static STACK_POOL: UnsafeCell<StackPool> = UnsafeCell::new(StackPool::new()));
 
@@ -97,7 +84,7 @@ struct CoroutineImpl<T = ()>
     name: Option<String>,
     state: State,
 
-    result: Option<CoroResult<*mut Option<T>>>,
+    result: Option<::Result<*mut Option<T>>>,
 }
 
 unsafe impl<T> Send for CoroutineImpl<T>
@@ -121,7 +108,7 @@ impl<T> CoroutineImpl<T>
         Context::swap(&mut self.context, &self.parent);
 
         if let State::ForceUnwind = self.state {
-            begin_unwind(ForceUnwind, &(file!(), line!()));
+            panic!(ForceUnwind);
         }
 
         match self.result.take() {
@@ -131,7 +118,7 @@ impl<T> CoroutineImpl<T>
         }
     }
 
-    unsafe fn resume(&mut self) -> CoroResult<Option<T>> {
+    unsafe fn resume(&mut self) -> ::Result<Option<T>> {
         Context::swap(&mut self.parent, &self.context);
         match self.result.take() {
             None => Ok(None),
@@ -157,7 +144,7 @@ impl<T> CoroutineImpl<T>
         self.yield_back()
     }
 
-    unsafe fn resume_with(&mut self, data: T) -> CoroResult<Option<T>> {
+    unsafe fn resume_with(&mut self, data: T) -> ::Result<Option<T>> {
         self.result = Some(Ok(&mut Some(data)));
         self.resume()
     }
@@ -262,7 +249,7 @@ impl<T> Coroutine<T>
                             error!("Coroutine '{}' panicked at '{}'", name, msg);
                         }
 
-                        coro_ref.result = Some(Err(CoroError::Panicking(err)));
+                        coro_ref.result = Some(Err(::Error::Panicking(err)));
                         true
                     } else {
                         false
@@ -272,7 +259,7 @@ impl<T> Coroutine<T>
 
             loop {
                 if is_panicked {
-                    coro_ref.result = Some(Err(CoroError::Panicked));
+                    coro_ref.result = Some(Err(::Error::Panicked));
                 }
 
                 unsafe {
@@ -304,14 +291,14 @@ impl<T> Coroutine<T>
     }
 
     #[inline]
-    pub fn resume(&self) -> CoroResult<Option<T>> {
+    pub fn resume(&self) -> ::Result<Option<T>> {
         unsafe {
             (&mut *self.coro.get()).resume()
         }
     }
 
     #[inline]
-    pub fn resume_with(&self, data: T) -> CoroResult<Option<T>> {
+    pub fn resume_with(&self, data: T) -> ::Result<Option<T>> {
         unsafe {
             (&mut *self.coro.get()).resume_with(data)
         }
@@ -380,9 +367,9 @@ impl<T> CoroutineRef<T>
 impl<T> Iterator for Coroutine<T>
     where T: Send,
 {
-    type Item = CoroResult<T>;
+    type Item = ::Result<T>;
 
-    fn next(&mut self) -> Option<CoroResult<T>> {
+    fn next(&mut self) -> Option<::Result<T>> {
         match self.resume() {
             Ok(r) => r.map(|x| Ok(x)),
             Err(err) => Some(Err(err)),

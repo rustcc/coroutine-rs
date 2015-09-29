@@ -12,7 +12,7 @@
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
-#![feature(rustc_private, rt, fnbox, asm, test, unboxed_closures, box_raw)]
+#![feature(rustc_private, fnbox, asm, test, unboxed_closures, catch_panic)]
 
 #[macro_use] extern crate log;
 extern crate libc;

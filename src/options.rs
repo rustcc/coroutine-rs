@@ -19,7 +19,7 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use std::rt::util::min_stack;
+const DEFAULT_STACK_SIZE: usize = 2 * 1024 * 1024; // 2M
 
 /// Coroutine spawn options
 #[derive(Debug)]
@@ -34,7 +34,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Options {
         Options {
-            stack_size: min_stack(),
+            stack_size: DEFAULT_STACK_SIZE,
             name: None,
         }
     }
