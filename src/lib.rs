@@ -20,7 +20,8 @@ extern crate test;
 extern crate context;
 
 use std::any::Any;
-use std::fmt::{self, Debug};
+use std::error;
+use std::fmt::{self, Display};
 
 pub use options::Options;
 
@@ -40,7 +41,7 @@ pub enum Error {
     Panicking(Box<Any + Send>),
 }
 
-impl Debug for Error {
+impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &Error::Panicked => write!(f, "Panicked"),
@@ -54,6 +55,21 @@ impl Debug for Error {
                 };
                 write!(f, "Panicking({})", msg)
             }
+        }
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", error::Error::description(self))
+    }
+}
+
+impl error::Error for Error {
+    fn description(&self) -> &str {
+        match self {
+            &Error::Panicked => "Panicked",
+            &Error::Panicking(..) => "Panicking(..)",
         }
     }
 }
