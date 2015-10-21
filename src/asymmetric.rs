@@ -268,7 +268,9 @@ impl<T> Coroutine<T>
             }
         };
 
-        coro.context.init_with(coroutine_initialize, 0, Box::new(wrapper), &mut stack);
+        let callback: Box<FnBox()> = Box::new(wrapper);
+
+        coro.context.init_with(coroutine_initialize, 0, Box::into_raw(Box::new(callback)) as *mut libc::c_void, &mut stack);
         coro.stack = Some(stack);
 
         Coroutine {
