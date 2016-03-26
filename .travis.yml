@@ -5,7 +5,8 @@ os:
     - linux
     - osx
 script:
-  - cargo build -v
-  - cargo test -v
+  - rustc -V
+  - cargo -V
+  - cargo test
   - cargo run --example simple
   - cargo doc --no-deps
