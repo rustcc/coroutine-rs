@@ -12,7 +12,7 @@
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico")]
 
-#![feature(rustc_private, fnbox, asm, test, unboxed_closures, catch_panic)]
+#![feature(fnbox, asm, test, unboxed_closures, std_panic, recover, panic_propagate)]
 
 #[macro_use] extern crate log;
 extern crate libc;
@@ -22,6 +22,8 @@ extern crate context;
 use std::any::Any;
 use std::error;
 use std::fmt::{self, Display};
+use std::panic;
+use std::thread;
 
 pub use options::Options;
 
@@ -72,4 +74,11 @@ impl error::Error for Error {
             &Error::Panicking(..) => "Panicking(..)",
         }
     }
+}
+
+unsafe fn try<R, F: FnOnce() -> R>(f: F) -> thread::Result<R> {
+    let mut f = Some(f);
+    let f = &mut f as *mut Option<F> as usize;
+
+    panic::recover(move || (*(f as *mut Option<F>)).take().unwrap()())
 }

@@ -23,7 +23,8 @@ path = "src/lib.rs"
 
 [dependencies]
 libc = "^0.1.10"
-context = { git = "http://github.com/zonyitoo/context-rs.git" }
+context = "1.0"
+log = "^0.3.5"
 
 [dev-dependencies]
 num_cpus = "*"
