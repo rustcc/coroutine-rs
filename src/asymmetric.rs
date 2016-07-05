@@ -123,19 +123,17 @@ pub struct Coroutine {
     state: State,
 }
 
-unsafe impl Send for Coroutine {}
-
 impl Coroutine {
     #[inline]
     pub fn spawn_opts<F>(f: F, opts: Options) -> Handle
-        where F: FnOnce(&mut Coroutine) + Send + 'static
+        where F: FnOnce(&mut Coroutine) + 'static
     {
         Self::spawn_opts_impl(Box::new(f), opts)
     }
 
     #[inline]
     pub fn spawn<F>(f: F) -> Handle
-        where F: FnOnce(&mut Coroutine) + Send + 'static
+        where F: FnOnce(&mut Coroutine) + 'static
     {
         Self::spawn_opts_impl(Box::new(f), Options::default())
     }
@@ -271,8 +269,6 @@ impl Handle {
         data
     }
 }
-
-unsafe impl Send for Handle {}
 
 impl Deref for Handle {
     type Target = Coroutine;
