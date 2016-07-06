@@ -9,14 +9,14 @@ fn main() {
     let rc = Rc::new(RefCell::new(0));
 
     let rc1 = rc.clone();
-    let mut coro1 = Coroutine::spawn(move |me| {
+    let mut coro1 = Coroutine::spawn(move |me,_| {
         *rc1.borrow_mut() = 1;
         let val = *rc1.borrow();
         me.yield_with(val); // (*rc1.borrow()) - fails with already borrowed
     });
 
     let rc2 = rc.clone();
-    let mut coro2 = Coroutine::spawn(move |me| {
+    let mut coro2 = Coroutine::spawn(move |me,_| {
         *rc2.borrow_mut() = 2;
         let val = *rc2.borrow();
         me.yield_with(val);

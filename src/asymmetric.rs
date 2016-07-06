@@ -39,7 +39,7 @@ struct ForceUnwind;
 
 struct InitData {
     stack: ProtectedFixedSizeStack,
-    callback: Box<FnBox(&mut Coroutine)>,
+    callback: Box<FnBox(&mut Coroutine, usize)>,
 }
 
 extern "C" fn coroutine_entry(t: Transfer) -> ! {
@@ -62,12 +62,12 @@ extern "C" fn coroutine_entry(t: Transfer) -> ! {
         let meta_ptr = &mut meta as *mut _ as usize;
         let _ = unsafe {
             ::try(move || {
-                let Transfer { context: ctx, .. } = t.context.resume(meta_ptr);
+                let Transfer { context, data } = t.context.resume(meta_ptr);
                 let meta_ref = &mut *(meta_ptr as *mut Coroutine);
-                meta_ref.context = Some(ctx);
+                meta_ref.context = Some(context);
 
                 // Take out the callback and run it
-                callback.call_box((meta_ref,));
+                callback.call_box((meta_ref, data));
 
                 trace!("Coroutine `{}`: returned from callback", meta_ref.debug_name());
             })
@@ -126,19 +126,19 @@ pub struct Coroutine {
 impl Coroutine {
     #[inline]
     pub fn spawn_opts<F>(f: F, opts: Options) -> Handle
-        where F: FnOnce(&mut Coroutine) + 'static
+        where F: FnOnce(&mut Coroutine, usize) + 'static
     {
         Self::spawn_opts_impl(Box::new(f), opts)
     }
 
     #[inline]
     pub fn spawn<F>(f: F) -> Handle
-        where F: FnOnce(&mut Coroutine) + 'static
+        where F: FnOnce(&mut Coroutine, usize) + 'static
     {
         Self::spawn_opts_impl(Box::new(f), Options::default())
     }
 
-    fn spawn_opts_impl(f: Box<FnBox(&mut Coroutine)>, opts: Options) -> Handle {
+    fn spawn_opts_impl(f: Box<FnBox(&mut Coroutine, usize)>, opts: Options) -> Handle {
         let data = InitData {
             stack: ProtectedFixedSizeStack::new(opts.stack_size).expect("failed to acquire stack"),
             callback: f,
