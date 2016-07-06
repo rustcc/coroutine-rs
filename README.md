@@ -16,6 +16,7 @@ Basic usage of Coroutine
 ```rust
 extern crate coroutine;
 
+use std::usize;
 use coroutine::asymmetric::Coroutine;
 
 fn main() {
@@ -23,6 +24,7 @@ fn main() {
         for num in 0..10 {
             me.yield_with(num);
         }
+        usize::MAX
     });
 
     for num in coro {

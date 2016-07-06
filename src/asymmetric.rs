@@ -39,7 +39,7 @@ struct ForceUnwind;
 
 struct InitData {
     stack: ProtectedFixedSizeStack,
-    callback: Box<FnBox(&mut Coroutine, usize)>,
+    callback: Box<FnBox(&mut Coroutine, usize) -> usize>,
 }
 
 extern "C" fn coroutine_entry(t: Transfer) -> ! {
@@ -50,7 +50,7 @@ extern "C" fn coroutine_entry(t: Transfer) -> ! {
     };
 
     // This block will ensure the `meta` will be destroied before dropping the stack
-    let ctx = {
+    let (ctx, result) = {
         let mut meta = Coroutine {
             context: None,
             name: None,
@@ -60,40 +60,42 @@ extern "C" fn coroutine_entry(t: Transfer) -> ! {
         // Yield back after take out the callback function
         // Now the Coroutine is initialized
         let meta_ptr = &mut meta as *mut _ as usize;
-        let _ = unsafe {
+        let result = unsafe {
             ::try(move || {
                 let Transfer { context, data } = t.context.resume(meta_ptr);
                 let meta_ref = &mut *(meta_ptr as *mut Coroutine);
                 meta_ref.context = Some(context);
 
                 // Take out the callback and run it
-                callback.call_box((meta_ref, data));
+                let result = callback.call_box((meta_ref, data));
 
-                trace!("Coroutine `{}`: returned from callback", meta_ref.debug_name());
+                trace!("Coroutine `{}`: returned from callback with result {}",
+                       meta_ref.debug_name(), result);
+                result
             })
         };
 
         trace!("Coroutine `{}`: finished => dropping stack", meta.debug_name());
 
         // If panicked inside, the meta.context stores the actual return Context
-        meta.take_context()
+        (meta.take_context(), result.ok())
     };
 
     // Drop the stack after it is finished
-    let mut stack_opt = Some(stack);
+    let mut stack_opt = Some((stack, result));
     ctx.resume_ontop(&mut stack_opt as *mut _ as usize, coroutine_exit);
 
     unreachable!();
 }
 
 extern "C" fn coroutine_exit(mut t: Transfer) -> Transfer {
-    unsafe {
+    let data = unsafe {
         // Drop the stack
-        let stack_ref = &mut *(t.data as *mut Option<ProtectedFixedSizeStack>);
-        let _ = stack_ref.take();
-    }
+        let stack_ref = &mut *(t.data as *mut Option<(ProtectedFixedSizeStack, Option<usize>)>);
+        stack_ref.take().and_then(|(_, result)| result).unwrap_or(usize::MAX)
+    };
 
-    t.data = usize::MAX;
+    t.data = data;
     t.context = unsafe { mem::transmute(0usize) };
     t
 }
@@ -126,19 +128,19 @@ pub struct Coroutine {
 impl Coroutine {
     #[inline]
     pub fn spawn_opts<F>(f: F, opts: Options) -> Handle
-        where F: FnOnce(&mut Coroutine, usize) + 'static
+        where F: FnOnce(&mut Coroutine, usize) -> usize + 'static
     {
         Self::spawn_opts_impl(Box::new(f), opts)
     }
 
     #[inline]
     pub fn spawn<F>(f: F) -> Handle
-        where F: FnOnce(&mut Coroutine, usize) + 'static
+        where F: FnOnce(&mut Coroutine, usize) -> usize + 'static
     {
         Self::spawn_opts_impl(Box::new(f), Options::default())
     }
 
-    fn spawn_opts_impl(f: Box<FnBox(&mut Coroutine, usize)>, opts: Options) -> Handle {
+    fn spawn_opts_impl(f: Box<FnBox(&mut Coroutine, usize) -> usize>, opts: Options) -> Handle {
         let data = InitData {
             stack: ProtectedFixedSizeStack::new(opts.stack_size).expect("failed to acquire stack"),
             callback: f,
