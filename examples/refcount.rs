@@ -1,5 +1,6 @@
 extern crate coroutine;
 
+use std::usize;
 use std::rc::Rc;
 use std::cell::RefCell;
 use coroutine::asymmetric::Coroutine;
@@ -13,6 +14,7 @@ fn main() {
         *rc1.borrow_mut() = 1;
         let val = *rc1.borrow();
         me.yield_with(val); // (*rc1.borrow()) - fails with already borrowed
+        usize::MAX
     });
 
     let rc2 = rc.clone();
@@ -20,6 +22,7 @@ fn main() {
         *rc2.borrow_mut() = 2;
         let val = *rc2.borrow();
         me.yield_with(val);
+        usize::MAX
     });
 
     println!("First: {}", (*coro1).yield_with(0));
