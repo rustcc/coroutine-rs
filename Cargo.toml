@@ -1,10 +1,11 @@
 [package]
 name = "coroutine"
-version = "0.5.0"
+version = "0.6.0"
 authors = [
     "Y. T. Chung <zonyitoo@gmail.com>",
     "Young.Wu <doomsplayer@gmail.com>",
-    "Rustcc Developers"
+    "Rustcc Developers",
+    "Denis Kolodin <deniskolodin@gmail.com>"
 ]
 license = "MIT/ISC"
 repository = "https://github.com/rustcc/coroutine-rs"
