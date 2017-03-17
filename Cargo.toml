@@ -1,13 +1,13 @@
 [package]
 name = "coroutine"
-version = "0.6.0"
+version = "0.7.0"
 authors = [
     "Y. T. Chung <zonyitoo@gmail.com>",
     "Young.Wu <doomsplayer@gmail.com>",
     "Rustcc Developers",
     "Denis Kolodin <deniskolodin@gmail.com>"
 ]
-license = "MIT/ISC"
+license = "MIT/Apache-2.0"
 repository = "https://github.com/rustcc/coroutine-rs"
 description = "Coroutine Library in Rust"
 readme = "README.md"
