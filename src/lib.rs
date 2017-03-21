@@ -14,7 +14,8 @@
 
 #![feature(fnbox, asm, test, unboxed_closures)]
 
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 extern crate libc;
 extern crate test;
 extern crate context;
@@ -28,7 +29,7 @@ use std::thread;
 pub use options::Options;
 
 pub mod asymmetric;
-pub mod options;
+mod options;
 
 /// Return type of resuming. Ok if resume successfully with the current state,
 /// Err if resume failed with `Error`.
@@ -50,9 +51,11 @@ impl fmt::Debug for Error {
             &Error::Panicking(ref err) => {
                 let msg = match err.downcast_ref::<&'static str>() {
                     Some(s) => *s,
-                    None => match err.downcast_ref::<String>() {
-                        Some(s) => &s[..],
-                        None => "Box<Any>",
+                    None => {
+                        match err.downcast_ref::<String>() {
+                            Some(s) => &s[..],
+                            None => "Box<Any>",
+                        }
                     }
                 };
                 write!(f, "Panicking({})", msg)

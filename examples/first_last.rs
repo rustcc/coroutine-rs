@@ -8,5 +8,5 @@ fn main() {
         2
     });
 
-    println!("Final value: {}", coro.resume(1));
+    println!("Final value: {}", coro.resume(1).unwrap());
 }
