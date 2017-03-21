@@ -4,6 +4,9 @@ rust: nightly
 os:
     - linux
     - osx
+
+cache: cargo
+
 script:
   - rustc -V
   - cargo -V
