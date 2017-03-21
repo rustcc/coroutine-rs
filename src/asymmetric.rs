@@ -373,7 +373,92 @@ impl Iterator for Handle {
             None
         } else {
             let x = self.resume(0);
-            if self.is_finished() { None } else { Some(x) }
+            Some(x)
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn generator() {
+        let coro = Coroutine::spawn(|coro, _| {
+            for i in 0..10 {
+                coro.yield_with(i);
+            }
+            10
+        });
+
+        let ret = coro.collect::<Vec<usize>>();
+        assert_eq!(&ret[..], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn yield_data() {
+        let mut coro = Coroutine::spawn(|coro, data| coro.yield_with(data));
+
+        assert_eq!(coro.resume(0), 0);
+        assert_eq!(coro.resume(1), 1);
+        assert!(coro.is_finished());
+    }
+
+    #[test]
+    fn unwinding() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Guard {
+            inner: Arc<AtomicUsize>,
+        }
+
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                self.inner.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let orig = Arc::new(AtomicUsize::new(0));
+
+        {
+            let pass = orig.clone();
+            let mut coro = Coroutine::spawn(move |coro, _| {
+                let _guard = Guard { inner: pass.clone() };
+                coro.yield_with(0);
+                let _guard2 = Guard { inner: pass };
+                0
+            });
+
+            coro.resume(0);
+            // Let it drop
+        }
+
+        assert_eq!(orig.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn resume_after_finished() {
+        let mut coro = Coroutine::spawn(|_, _| 0);
+        coro.resume(0);
+        coro.resume(0);
+    }
+
+    #[test]
+    fn state() {
+        let mut coro = Coroutine::spawn(|coro, _| {
+            coro.yield_with(0);
+            coro.park_with(0);
+            0
+        });
+
+        assert_eq!(coro.state(), State::Suspended);
+        coro.resume(0);
+        assert_eq!(coro.state(), State::Suspended);
+        coro.resume(0);
+        assert_eq!(coro.state(), State::Parked);
+        coro.resume(0);
+        assert_eq!(coro.state(), State::Finished);
     }
 }
