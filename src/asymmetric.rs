@@ -70,12 +70,14 @@ extern "C" fn coroutine_entry(t: Transfer) -> ! {
                 let result = callback.call_box((meta_ref, data));
 
                 trace!("Coroutine `{}`: returned from callback with result {}",
-                       meta_ref.debug_name(), result);
+                       meta_ref.debug_name(),
+                       result);
                 result
             })
         };
 
-        trace!("Coroutine `{}`: finished => dropping stack", meta.debug_name());
+        trace!("Coroutine `{}`: finished => dropping stack",
+               meta.debug_name());
 
         // If panicked inside, the meta.context stores the actual return Context
         (meta.take_context(), result.ok())
@@ -116,6 +118,7 @@ pub enum State {
     Suspended,
     Running,
     Parked,
+    Finished,
 }
 
 #[derive(Debug)]
@@ -164,46 +167,63 @@ impl Coroutine {
         Handle(coro_ref)
     }
 
-    pub fn take_context(&mut self) -> Context {
+    fn take_context(&mut self) -> Context {
         self.context.take().unwrap()
     }
 
     #[inline]
-    pub fn state(&self) -> State {
+    fn state(&self) -> State {
         self.state
     }
 
     #[inline]
-    pub fn name(&self) -> Option<&String> {
+    fn name(&self) -> Option<&String> {
         self.name.as_ref()
     }
 
     #[inline]
-    pub fn set_name(&mut self, name: String) {
+    fn set_name(&mut self, name: String) {
         self.name = Some(name);
     }
 
     #[inline]
-    pub fn debug_name(&self) -> String {
+    fn debug_name(&self) -> String {
         match self.name {
             Some(ref name) => name.clone(),
             None => format!("{:p}", self),
         }
     }
 
-    #[inline]
-    pub fn yield_with(&mut self, data: usize) -> usize {
+    #[inline(never)]
+    fn yield_with_state(&mut self, state: State, data: usize) -> Transfer {
         let context = self.take_context();
 
         trace!("Coroutine `{}`: yielding to {:?}",
                self.debug_name(),
                &context);
 
-        self.state = State::Parked;
+        self.state = state;
 
-        let Transfer { context, data } = context.resume(data);
+        context.resume(data)
+    }
+
+    #[inline]
+    fn valid_yield(&mut self, state: State, data: usize) -> usize {
+        let Transfer { context, data } = self.yield_with_state(state, data);
         self.context = Some(context);
         data
+    }
+
+    /// Yield the current coroutine with `Suspended` state
+    #[inline]
+    pub fn yield_with(&mut self, data: usize) -> usize {
+        self.valid_yield(State::Suspended, data)
+    }
+
+    /// Yield the current coroutine with `Parked` state
+    #[inline]
+    pub fn park_with(&mut self, data: usize) -> usize {
+        self.valid_yield(State::Parked, data)
     }
 }
 
@@ -239,24 +259,16 @@ impl Handle {
     /// Resume the Coroutine
     #[inline]
     pub fn resume(&mut self, data: usize) -> usize {
-        self.yield_with(State::Running, data)
+        self.yield_with_state(State::Running, data)
     }
 
     /// Yields the Coroutine to the Processor
-    #[inline(never)]
-    pub fn yield_with(&mut self, state: State, data: usize) -> usize {
-        assert!(self.0 != ptr::null_mut());
+    #[inline]
+    fn yield_with_state(&mut self, state: State, data: usize) -> usize {
+        assert!(!self.is_finished());
 
         let coro = unsafe { &mut *self.0 };
-        let context = coro.take_context();
-
-        trace!("Coroutine `{}`: yielding to {:?}",
-               coro.debug_name(),
-               &context);
-
-        coro.state = state;
-
-        let Transfer { context, data } = context.resume(data);
+        let Transfer { context, data } = coro.yield_with_state(state, data);
 
         // We've returned from a yield to the Processor, because it resume()d us!
         // `context` is the Context of the Processor which we store so we can yield back to it.
@@ -267,6 +279,44 @@ impl Handle {
             coro.context = Some(context);
         }
         data
+    }
+
+    /// Get state of coroutine
+    #[inline]
+    pub fn state(&self) -> State {
+        if self.is_finished() {
+            State::Finished
+        } else {
+            let coro = unsafe { &*self.0 };
+            coro.state()
+        }
+    }
+
+    /// Get name of coroutine
+    #[inline]
+    pub fn name(&self) -> Option<&String> {
+        assert!(!self.is_finished());
+        let coro = unsafe { &*self.0 };
+        coro.name()
+    }
+
+    /// Set name of coroutine
+    #[inline]
+    pub fn set_name(&mut self, name: String) {
+        assert!(!self.is_finished());
+        let coro = unsafe { &mut *self.0 };
+        coro.set_name(name)
+    }
+
+    /// Gets debug name for coroutine
+    #[inline]
+    pub fn debug_name(&self) -> String {
+        if self.is_finished() {
+            "<finished>".to_owned()
+        } else {
+            let coro = unsafe { &*self.0 };
+            coro.debug_name()
+        }
     }
 }
 
@@ -323,11 +373,7 @@ impl Iterator for Handle {
             None
         } else {
             let x = self.resume(0);
-            if self.is_finished() {
-                None
-            } else {
-                Some(x)
-            }
+            if self.is_finished() { None } else { Some(x) }
         }
     }
 }
