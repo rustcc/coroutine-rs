@@ -231,14 +231,12 @@ impl Handle {
     }
 
     /// Check if the Coroutine is already finished
-    #[doc(hidden)]
     #[inline]
     pub fn is_finished(&self) -> bool {
         self.0 == ptr::null_mut()
     }
 
     /// Resume the Coroutine
-    #[doc(hidden)]
     #[inline]
     pub fn resume(&mut self, data: usize) -> usize {
         self.yield_with(State::Running, data)
