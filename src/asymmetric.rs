@@ -38,9 +38,11 @@ use options::Options;
 #[derive(Debug)]
 struct ForceUnwind;
 
+type Thunk<'a> = Box<FnBox(&mut Coroutine, usize) -> usize + 'a>;
+
 struct InitData {
     stack: ProtectedFixedSizeStack,
-    callback: Box<FnBox(&mut Coroutine, usize) -> usize>,
+    callback: Thunk<'static>,
 }
 
 extern "C" fn coroutine_entry(t: Transfer) -> ! {
@@ -69,6 +71,7 @@ extern "C" fn coroutine_entry(t: Transfer) -> ! {
                 meta_ref.context = Some(context);
 
                 // Take out the callback and run it
+                // let result = callback.call_box((meta_ref, data));
                 let result = callback.call_box((meta_ref, data));
 
                 trace!("Coroutine `{}`: returned from callback with result {}",
@@ -178,7 +181,7 @@ impl Coroutine {
     pub fn spawn_opts<F>(f: F, opts: Options) -> Handle
         where F: FnOnce(&mut Coroutine, usize) -> usize + 'static
     {
-        Self::spawn_opts_impl(Box::new(f), opts)
+        Self::spawn_opts_impl(Box::new(f) as Thunk<'static>, opts)
     }
 
     /// Spawn a coroutine with default options
@@ -189,7 +192,7 @@ impl Coroutine {
         Self::spawn_opts_impl(Box::new(f), Options::default())
     }
 
-    fn spawn_opts_impl(f: Box<FnBox(&mut Coroutine, usize) -> usize>, opts: Options) -> Handle {
+    fn spawn_opts_impl(f: Thunk<'static>, opts: Options) -> Handle {
         let data = InitData {
             stack: ProtectedFixedSizeStack::new(opts.stack_size).expect("failed to acquire stack"),
             callback: f,
@@ -439,7 +442,7 @@ mod test {
     }
 
     #[test]
-    fn unwinding() {
+    fn force_unwinding() {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -472,7 +475,7 @@ mod test {
     }
 
     #[test]
-    fn force_unwinding() {
+    fn unwinding() {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
