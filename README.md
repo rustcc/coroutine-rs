@@ -5,8 +5,8 @@
 Coroutine library in Rust
 
 ```toml
-[dependencies.coroutine]
-git = "0.5.0"
+[dependencies]
+coroutine = "0.8"
 ```
 
 ## Usage
