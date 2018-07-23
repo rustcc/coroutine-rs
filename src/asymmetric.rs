@@ -22,7 +22,6 @@
 
 //! Asymmetric coroutines
 
-use std::boxed::FnBox;
 use std::fmt;
 use std::usize;
 use std::panic;
@@ -38,7 +37,19 @@ use options::Options;
 #[derive(Debug)]
 struct ForceUnwind;
 
-type Thunk<'a> = Box<FnBox(&mut Coroutine, usize) -> usize + 'a>;
+
+trait FnBox {
+    fn call_box(self: Box<Self>, meta_ref: &mut Coroutine, data: usize) -> usize;
+}
+
+
+impl<F: FnOnce(&mut Coroutine, usize) -> usize> FnBox for F {
+    fn call_box(self: Box<F>, meta_ref: &mut Coroutine, data: usize) -> usize {
+        (*self)(meta_ref, data)
+    }
+}
+
+type Thunk<'a> = Box<FnBox + 'a>;
 
 struct InitData {
     stack: ProtectedFixedSizeStack,
@@ -72,7 +83,7 @@ extern "C" fn coroutine_entry(t: Transfer) -> ! {
 
                 // Take out the callback and run it
                 // let result = callback.call_box((meta_ref, data));
-                let result = callback.call_box((meta_ref, data));
+                let result = callback.call_box(meta_ref, data);
 
                 trace!("Coroutine `{}`: returned from callback with result {}",
                        meta_ref.debug_name(),

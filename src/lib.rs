@@ -21,9 +21,6 @@
 //! Resume1 1
 //! Resume2 2
 //! ```
-
-#![feature(fnbox)]
-
 #[macro_use]
 extern crate log;
 extern crate libc;

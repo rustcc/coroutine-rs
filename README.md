@@ -63,8 +63,6 @@ For more detail, please run `cargo doc --open`.
 
 ## Notes
 
-* Currently this crate **can only** be built with Rust nightly because of some unstable features.
-
 * Basically it supports arm, i686, mips, mipsel and x86_64 platforms, but we have only tested in
 
     - OS X 10.10.*, x86_64, nightly
