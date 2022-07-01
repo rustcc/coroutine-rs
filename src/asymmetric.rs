@@ -58,8 +58,8 @@ struct InitData {
 
 extern "C" fn coroutine_entry(t: Transfer) -> ! {
     // Take over the data from Coroutine::spawn_opts
-    let InitData { stack, callback } = unsafe {
-        let data_opt_ref = &mut *(t.data as *mut Option<InitData>);
+    let InitData { stack, callback } = {
+        let data_opt_ref = unsafe {&mut *(t.data as *mut Option<InitData>)};
         data_opt_ref.take().expect("failed to acquire InitData")
     };
 
@@ -137,9 +137,9 @@ extern "C" fn coroutine_entry(t: Transfer) -> ! {
 }
 
 extern "C" fn coroutine_exit(mut t: Transfer) -> Transfer {
-    let data = unsafe {
+    let data = {
         // Drop the stack
-        let stack_ref = &mut *(t.data as *mut Option<(ProtectedFixedSizeStack, usize)>);
+        let stack_ref = unsafe {&mut *(t.data as *mut Option<(ProtectedFixedSizeStack, usize)>)};
         let (_, result) = stack_ref.take().unwrap();
         result
     };
